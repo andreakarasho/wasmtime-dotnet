@@ -514,8 +514,8 @@ public struct ComponentValue : IDisposable
         val.kind = 18;
         if (inner.HasValue)
         {
-            var ptr = wasmtime_component_val_new();
-            *ptr = inner.Value._val;
+            var src = inner.Value._val;
+            var ptr = wasmtime_component_val_new(&src);
             val.of.option = ptr;
         }
         else
@@ -547,8 +547,8 @@ public struct ComponentValue : IDisposable
         val.of.variant.discriminant = new ByteVector(discriminant).Value;
         if (payload.HasValue)
         {
-            var ptr = wasmtime_component_val_new();
-            *ptr = payload.Value._val;
+            var src = payload.Value._val;
+            var ptr = wasmtime_component_val_new(&src);
             val.of.variant.val = ptr;
         }
         else
@@ -640,6 +640,34 @@ public struct ComponentValue : IDisposable
     }
 
     /// <summary>
+    /// Extracts the host representation and drops the underlying resource handle.
+    /// Intended for use by [resource-drop] imports to clear the wasmtime handle table.
+    /// </summary>
+    public readonly unsafe uint ToResourceRepAndDrop(StoreContext context)
+    {
+        // Borrow handles may arrive as plain u32 from the native layer
+        if (_val.kind == 6)
+        {
+            return _val.of.u32;
+        }
+
+        if (_val.kind != 21) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Resource.");
+        wasmtime_component_resource_host_t* hostRes;
+        var error = wasmtime_component_resource_any_to_host(context.Handle, _val.of.resource, &hostRes);
+        WasmtimeException.ThrowIfError(error);
+        var rep = wasmtime_component_resource_host_rep(hostRes);
+        wasmtime_component_resource_host_delete(hostRes);
+
+        if (_val.of.resource != null)
+        {
+            var dropError = wasmtime_component_resource_any_drop(context.Handle, _val.of.resource);
+            WasmtimeException.ThrowIfError(dropError);
+        }
+
+        return rep;
+    }
+
+    /// <summary>
     /// Extracts the host representation (u32 handle) from a resource ComponentValue.
     /// Overload accepting a <see cref="Store"/> for use outside of callbacks.
     /// </summary>
@@ -665,6 +693,25 @@ public struct ComponentValue : IDisposable
         Dispose(ref _val);
     }
 
+    /// <summary>
+    /// Releases resources associated with this value using a store context.
+    /// This enables proper cleanup for borrowed resources.
+    /// </summary>
+    public unsafe void Dispose(Store store)
+    {
+        Dispose(ref _val, store.Context);
+    }
+
+    internal static unsafe void Dispose(ref wasmtime_component_val val, wasmtime_context* context)
+    {
+        if (context != null)
+        {
+            DropBorrowedResources(ref val, context);
+        }
+
+        Dispose(ref val);
+    }
+
     internal static unsafe void Dispose(ref wasmtime_component_val val)
     {
         switch (val.kind)
@@ -687,8 +734,7 @@ public struct ComponentValue : IDisposable
                 new ByteVector(val.of.variant.discriminant).Dispose();
                 if (val.of.variant.val != null)
                 {
-                    Dispose(ref *val.of.variant.val);
-                    wasmtime_component_val_delete(val.of.variant.val);
+                    wasmtime_component_val_free(val.of.variant.val);
                 }
                 DecrementActiveCount();
                 break;
@@ -699,8 +745,7 @@ public struct ComponentValue : IDisposable
             case 18:
                 if (val.of.option != null)
                 {
-                    Dispose(ref *val.of.option);
-                    wasmtime_component_val_delete(val.of.option);
+                    wasmtime_component_val_free(val.of.option);
                 }
                 DecrementActiveCount();
                 break;
@@ -718,5 +763,67 @@ public struct ComponentValue : IDisposable
         }
 
         val = default;
+    }
+
+    internal static unsafe void DropBorrowedResources(ref wasmtime_component_val val, wasmtime_context* context)
+    {
+        switch (val.kind)
+        {
+            case 13: // list
+            {
+                var list = val.of.list;
+                var size = (int)list.size;
+                for (var i = 0; i < size; i++)
+                {
+                    DropBorrowedResources(ref list.data[i], context);
+                }
+                break;
+            }
+            case 14: // record
+            {
+                var record = val.of.record;
+                var size = (int)record.size;
+                for (var i = 0; i < size; i++)
+                {
+                    DropBorrowedResources(ref record.data[i].val, context);
+                }
+                break;
+            }
+            case 15: // tuple
+            {
+                var tuple = val.of.tuple;
+                var size = (int)tuple.size;
+                for (var i = 0; i < size; i++)
+                {
+                    DropBorrowedResources(ref tuple.data[i], context);
+                }
+                break;
+            }
+            case 16: // variant
+                if (val.of.variant.val != null)
+                {
+                    DropBorrowedResources(ref *val.of.variant.val, context);
+                }
+                break;
+            case 18: // option
+                if (val.of.option != null)
+                {
+                    DropBorrowedResources(ref *val.of.option, context);
+                }
+                break;
+            case 19: // result
+                if (val.of.result.val != null)
+                {
+                    DropBorrowedResources(ref *val.of.result.val, context);
+                }
+                break;
+            case 21: // resource
+                if (val.of.resource != null && !wasmtime_component_resource_any_owned(val.of.resource))
+                {
+                    var error = wasmtime_component_resource_any_drop(context, val.of.resource);
+                    WasmtimeException.ThrowIfError(error);
+                }
+                break;
+        }
     }
 }

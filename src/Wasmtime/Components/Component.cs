@@ -220,9 +220,6 @@ public unsafe class Component : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    /// <summary>
-    /// Finalizer to ensure unmanaged resources are released.
-    /// </summary>
     ~Component()
     {
         ReleaseUnmanagedResources();

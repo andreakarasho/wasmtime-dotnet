@@ -85,6 +85,12 @@ namespace Wasmtime.Interop
             [NativeTypeName("const wasmtime_component_resource_any_t *")] wasmtime_component_resource_any_t* resource);
 
         [DllImport("wasmtime", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [return: NativeTypeName("wasmtime_error_t *")]
+        internal static extern wasmtime_error* wasmtime_component_resource_any_drop(
+            [NativeTypeName("wasmtime_context_t *")] wasmtime_context* ctx,
+            [NativeTypeName("const wasmtime_component_resource_any_t *")] wasmtime_component_resource_any_t* resource);
+
+        [DllImport("wasmtime", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void wasmtime_component_resource_any_delete(
             wasmtime_component_resource_any_t* resource);
     }
