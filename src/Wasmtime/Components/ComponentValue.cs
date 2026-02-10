@@ -504,13 +504,168 @@ public struct ComponentValue : IDisposable
         return new ComponentCallResults(tuple.data, (int)tuple.size);
     }
 
+    /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing an option type.
+    /// Pass a non-null inner value for Some, or null for None.
+    /// </summary>
+    public static unsafe ComponentValue CreateOption(ComponentValue? inner)
+    {
+        var val = new wasmtime_component_val();
+        val.kind = 18;
+        if (inner.HasValue)
+        {
+            var ptr = wasmtime_component_val_new();
+            *ptr = inner.Value._val;
+            val.of.option = ptr;
+        }
+        else
+        {
+            val.of.option = null;
+        }
+        return new ComponentValue(val, false);
+    }
+
+    /// <summary>
+    /// Extracts the inner value of an option. Returns null for None.
+    /// </summary>
+    public readonly unsafe ComponentValue? ToOption()
+    {
+        if (_val.kind != 18) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Option.");
+        if (_val.of.option == null) return null;
+        return new ComponentValue(*_val.of.option, true);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing a variant type.
+    /// </summary>
+    /// <param name="discriminant">The variant case name.</param>
+    /// <param name="payload">The payload value, or null if the case has no payload.</param>
+    public static unsafe ComponentValue CreateVariant(string discriminant, ComponentValue? payload)
+    {
+        var val = new wasmtime_component_val();
+        val.kind = 16;
+        val.of.variant.discriminant = new ByteVector(discriminant).Value;
+        if (payload.HasValue)
+        {
+            var ptr = wasmtime_component_val_new();
+            *ptr = payload.Value._val;
+            val.of.variant.val = ptr;
+        }
+        else
+        {
+            val.of.variant.val = null;
+        }
+        return new ComponentValue(val, false);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing an owned resource handle.
+    /// </summary>
+    /// <param name="context">The store context.</param>
+    /// <param name="rep">The host representation value (handle index).</param>
+    /// <param name="typeId">The resource type ID as registered with the linker.</param>
+    public static unsafe ComponentValue CreateOwnResource(StoreContext context, uint rep, uint typeId)
+    {
+        var hostRes = wasmtime_component_resource_host_new(true, rep, typeId);
+        try
+        {
+            wasmtime_component_resource_any_t* anyRes;
+            var error = wasmtime_component_resource_host_to_any(context.Handle, hostRes, &anyRes);
+            WasmtimeException.ThrowIfError(error);
+
+            var val = new wasmtime_component_val();
+            val.kind = 21;
+            val.of.resource = anyRes;
+            return new ComponentValue(val, false);
+        }
+        finally
+        {
+            wasmtime_component_resource_host_delete(hostRes);
+        }
+    }
+
+    /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing an owned resource handle.
+    /// Overload accepting a <see cref="Store"/> for use outside of callbacks.
+    /// </summary>
+    public static unsafe ComponentValue CreateOwnResource(Store store, uint rep, uint typeId)
+        => CreateOwnResource(new StoreContext(store.Context), rep, typeId);
+
+    /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing a borrowed resource handle.
+    /// </summary>
+    /// <param name="context">The store context.</param>
+    /// <param name="rep">The host representation value (handle index).</param>
+    /// <param name="typeId">The resource type ID as registered with the linker.</param>
+    public static unsafe ComponentValue CreateBorrowResource(StoreContext context, uint rep, uint typeId)
+    {
+        var hostRes = wasmtime_component_resource_host_new(false, rep, typeId);
+        try
+        {
+            wasmtime_component_resource_any_t* anyRes;
+            var error = wasmtime_component_resource_host_to_any(context.Handle, hostRes, &anyRes);
+            WasmtimeException.ThrowIfError(error);
+            var val = new wasmtime_component_val();
+            val.kind = 21;
+            val.of.resource = anyRes;
+            return new ComponentValue(val, false);
+        }
+        finally
+        {
+            wasmtime_component_resource_host_delete(hostRes);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the host representation (u32 handle) from a resource ComponentValue.
+    /// Requires a store context to convert from any-resource to host-resource.
+    /// Also accepts u32 values (kind 6) since borrow handles may arrive as plain u32
+    /// from the native wasmtime layer.
+    /// </summary>
+    public readonly unsafe uint ToResourceRep(StoreContext context)
+    {
+        // Borrow handles may arrive as plain u32 from the native layer
+        if (_val.kind == 6)
+        {
+            return _val.of.u32;
+        }
+
+        if (_val.kind != 21) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Resource.");
+        wasmtime_component_resource_host_t* hostRes;
+        var error = wasmtime_component_resource_any_to_host(context.Handle, _val.of.resource, &hostRes);
+        WasmtimeException.ThrowIfError(error);
+        var rep = wasmtime_component_resource_host_rep(hostRes);
+        wasmtime_component_resource_host_delete(hostRes);
+        return rep;
+    }
+
+    /// <summary>
+    /// Extracts the host representation (u32 handle) from a resource ComponentValue.
+    /// Overload accepting a <see cref="Store"/> for use outside of callbacks.
+    /// </summary>
+    public readonly unsafe uint ToResourceRep(Store store)
+        => ToResourceRep(new StoreContext(store.Context));
+
+    /// <summary>
+    /// Extracts the discriminant and payload of a variant.
+    /// </summary>
+    public readonly unsafe (string Discriminant, ComponentValue? Payload) ToVariant()
+    {
+        if (_val.kind != 16) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Variant.");
+        var discriminant = new ByteVector(_val.of.variant.discriminant).GetString();
+        ComponentValue? payload = _val.of.variant.val != null
+            ? new ComponentValue(*_val.of.variant.val, true)
+            : null;
+        return (discriminant, payload);
+    }
+
     /// <inheritdoc />
-    public void Dispose()
+    public unsafe void Dispose()
     {
         Dispose(ref _val);
     }
 
-    internal static void Dispose(ref wasmtime_component_val val)
+    internal static unsafe void Dispose(ref wasmtime_component_val val)
     {
         switch (val.kind)
         {
@@ -528,12 +683,36 @@ public struct ComponentValue : IDisposable
                 new RecordBuilder(val.of.record).Dispose();
                 DecrementActiveCount();
                 break;
+            case 16:
+                new ByteVector(val.of.variant.discriminant).Dispose();
+                if (val.of.variant.val != null)
+                {
+                    Dispose(ref *val.of.variant.val);
+                    wasmtime_component_val_delete(val.of.variant.val);
+                }
+                DecrementActiveCount();
+                break;
             case 17:
                 // Enums are not disposed since the values are cached and reused (constants).
                 DecrementActiveCount();
                 break;
+            case 18:
+                if (val.of.option != null)
+                {
+                    Dispose(ref *val.of.option);
+                    wasmtime_component_val_delete(val.of.option);
+                }
+                DecrementActiveCount();
+                break;
             case 20:
                 new FlagsBuilder(val.of.flags).Dispose();
+                DecrementActiveCount();
+                break;
+            case 21:
+                if (val.of.resource != null)
+                {
+                    wasmtime_component_resource_any_delete(val.of.resource);
+                }
                 DecrementActiveCount();
                 break;
         }
