@@ -1,14 +1,14 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using TestWorld.wit.imports.tests.component.v0_1_0;
-using static TestWorld.wit.imports.tests.component.v0_1_0.ITypes;
+using TestWorld.wit.Imports.tests.component.v0_1_0;
+using static TestWorld.wit.Imports.tests.component.v0_1_0.ITypesImports;
 
 namespace TestWorld;
 
-public sealed class TestWorldImpl : ITestWorld
+public sealed class TestWorldExportsImpl : ITestWorldExports
 {
-    public static Dictionary<int, ITypes.Entity> Entities { get; } = new();
+    public static Dictionary<int, Entity> Entities { get; } = new();
 
     public static string CombineString(string s1, string s2)
     {
@@ -43,9 +43,9 @@ public sealed class TestWorldImpl : ITestWorld
 
     public static Point AddPoint(Point p1, Point p2) => new(p1.x + p2.x, p1.y + p2.y);
 
-    public static void RegisterEntity(ITypes.Entity e) => Entities[e.id] = e;
+    public static void RegisterEntity(Entity e) => Entities[e.id] = e;
 
-    public static void RegisterEntities(List<ITypes.Entity> e)
+    public static void RegisterEntities(List<Entity> e)
     {
         foreach (var entity in e)
         {
@@ -53,9 +53,9 @@ public sealed class TestWorldImpl : ITestWorld
         }
     }
 
-    public static ITypes.Entity GetEntity(int id) => Entities.TryGetValue(id, out var entity) ? entity : new ITypes.Entity(-1, "", new Point(0, 0));
+    public static Entity GetEntity(int id) => Entities.TryGetValue(id, out var entity) ? entity : new Entity(-1, "", new Point(0, 0));
 
-    public static List<ITypes.Entity> GetEntities()
+    public static List<Entity> GetEntities()
     {
         return Entities.Values.ToList();
     }
@@ -110,7 +110,7 @@ public sealed class TestWorldImpl : ITestWorld
 
     public static string GetHostEntityDescription()
     {
-        var entity = exports.TestWorld.GetHostEntity();
+        var entity = ITestWorldImports.GetHostEntity();
 
         return $"Entity {entity.id}: {entity.name}";
     }
@@ -130,12 +130,12 @@ public sealed class TestWorldImpl : ITestWorld
 
     public static void HostCallback()
     {
-        exports.TestWorld.Callback();
+        ITestWorldImports.Callback();
     }
 
     public static string HostCombineString(string s1, string s2)
     {
-        return exports.TestWorld.CallbackCombineString(s1, s2);
+        return ITestWorldImports.CallbackCombineString(s1, s2);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

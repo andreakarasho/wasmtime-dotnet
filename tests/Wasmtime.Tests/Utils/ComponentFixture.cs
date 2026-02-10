@@ -61,7 +61,7 @@ public class ComponentFixture : IDisposable
             Store.AddWasiP2();
 
             Instance = Store.GetComponentInstance(component, linker);
-            Exports = new Wit.Tests.Component.TestExports(Instance);
+            Exports = new Wit.Tests.Component.TestExports(Instance, Store);
         }
 
         public void Dispose()

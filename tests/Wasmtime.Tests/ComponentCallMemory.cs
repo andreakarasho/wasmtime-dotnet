@@ -16,10 +16,6 @@ public class ComponentCallMemory(ComponentFixture fixture, ITestOutputHelper out
     [Fact]
     public void Host_To_Guest()
     {
-#if SUITE_CSHARP
-        Assert.Skip("Open issue in wit-bindgen: https://github.com/bytecodealliance/wit-bindgen/issues/1377");
-#endif
-
         using var state = fixture.CreateState();
 
         var str = new string('a', Size);

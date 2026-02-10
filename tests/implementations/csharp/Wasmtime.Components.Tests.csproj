@@ -12,6 +12,24 @@
 
         <InvariantGlobalization>true</InvariantGlobalization>
         <SelfContained>true</SelfContained>
+        <PrebuiltWitBindgenVersion>0.52.0</PrebuiltWitBindgenVersion>
+        <WitBindgenArch Condition="'$(WitBindgenArch)'=='' And '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)'=='X64'">x86_64</WitBindgenArch>
+        <WitBindgenArch Condition="'$(WitBindgenArch)'=='' And '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)'=='Arm64'">aarch64</WitBindgenArch>
+        <WitBindgenOS Condition="'$(WitBindgenOS)'=='' And $([MSBuild]::IsOSPlatform('Windows'))">windows</WitBindgenOS>
+        <WitBindgenOS Condition="'$(WitBindgenOS)'=='' And $([MSBuild]::IsOSPlatform('OSX'))">macos</WitBindgenOS>
+        <WitBindgenOS Condition="'$(WitBindgenOS)'=='' And $([MSBuild]::IsOSPlatform('Linux'))">linux</WitBindgenOS>
+        <WitBindgenToolTarget>$(WitBindgenArch)-$(WitBindgenOS)</WitBindgenToolTarget>
+        <WitBindgenExe>$(MSBuildThisFileDirectory)..\tools\$(WitBindgenToolTarget)\wit-bindgen</WitBindgenExe>
+        <WitBindgenExe Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(WitBindgenExe).exe</WitBindgenExe>
+        <WitBindgenExeName>wit-bindgen</WitBindgenExeName>
+        <WitBindgenExeName Condition="$([MSBuild]::IsOSPlatform('Windows'))">wit-bindgen.exe</WitBindgenExeName>
+        <WitBindgenArchiveExt Condition="$([MSBuild]::IsOSPlatform('Windows'))">zip</WitBindgenArchiveExt>
+        <WitBindgenArchiveExt Condition="!$([MSBuild]::IsOSPlatform('Windows'))">tar.gz</WitBindgenArchiveExt>
+        <WitBindgenToolsRoot>$(MSBuildThisFileDirectory)..\tools</WitBindgenToolsRoot>
+        <WitBindgenDownloadName>wit-bindgen-$(PrebuiltWitBindgenVersion)-$(WitBindgenToolTarget)</WitBindgenDownloadName>
+        <WitBindgenArchive>$(WitBindgenToolsRoot)\$(WitBindgenDownloadName).$(WitBindgenArchiveExt)</WitBindgenArchive>
+        <WitBindgenExtractDir>$(WitBindgenToolsRoot)\$(WitBindgenDownloadName)</WitBindgenExtractDir>
+        <WitBindgenDownloadUrl>https://github.com/bytecodealliance/wit-bindgen/releases/download/v$(PrebuiltWitBindgenVersion)/$(WitBindgenDownloadName).$(WitBindgenArchiveExt)</WitBindgenDownloadUrl>
     </PropertyGroup>
 
     <ItemGroup>
@@ -19,6 +37,33 @@
         <PackageReference Include="runtime.win-x64.microsoft.dotnet.ilcompiler.llvm" Version="10.0.0-alpha.1.25162.1"/>
         <PackageReference Include="BytecodeAlliance.Componentize.DotNet.Wasm.SDK" Version="0.7.0-preview00010"/>
     </ItemGroup>
+
+    <Target Name="DownloadWitBindgen" BeforeTargets="WitCompile_InvokeTool" Condition="'$(PrebuiltWitBindgenVersion)'!='' And !Exists('$(WitBindgenExe)')">
+        <MakeDir Directories="$(WitBindgenToolsRoot)" />
+        <DownloadFile
+            SourceUrl="$(WitBindgenDownloadUrl)"
+            DestinationFolder="$(WitBindgenToolsRoot)"
+            DestinationFileName="$(WitBindgenDownloadName).$(WitBindgenArchiveExt)"
+            SkipUnchangedFiles="true"
+        />
+        <Unzip
+            Condition="'$(WitBindgenArchiveExt)'=='zip'"
+            SourceFiles="$(WitBindgenArchive)"
+            DestinationFolder="$(WitBindgenToolsRoot)"
+        />
+        <Exec
+            Condition="'$(WitBindgenArchiveExt)'!='zip'"
+            Command="tar -xzf &quot;$(WitBindgenArchive)&quot; -C &quot;$(WitBindgenToolsRoot)&quot;"
+            StandardOutputImportance="Low"
+            StandardErrorImportance="Low"
+        />
+        <MakeDir Directories="$(WitBindgenToolsRoot)\$(WitBindgenToolTarget)" />
+        <Copy
+            SourceFiles="$(WitBindgenExtractDir)\$(WitBindgenExeName)"
+            DestinationFiles="$(WitBindgenExe)"
+            SkipUnchangedFiles="true"
+        />
+    </Target>
 
     <ItemGroup>
         <Wit Remove="**\*.wit"  />
