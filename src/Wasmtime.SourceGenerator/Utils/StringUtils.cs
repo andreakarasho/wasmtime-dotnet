@@ -4,20 +4,23 @@ namespace Wasmtime.SourceGenerator;
 
 public class StringUtils
 {
-    private static readonly Regex DashRegex = new("-(.)?", RegexOptions.Compiled);
+    private static readonly Regex SeparatorRegex = new(@"[-.\[\]](.)?", RegexOptions.Compiled);
 
     /// <summary>
     /// Change the name to a valid C# name.
     /// </summary>
     /// <example>
     /// 'foo-bar' becomes 'FooBar'
+    /// '[constructor]system' becomes 'ConstructorSystem'
+    /// '[method]system.add-commands' becomes 'MethodSystemAddCommands'
+    /// '[resource-drop]system' becomes 'ResourceDropSystem'
     /// </example>
     /// <param name="name">WIT name</param>
     /// <param name="uppercaseFirst">If <c>true</c>, the first character will be uppercased.</param>
     /// <returns>C# name</returns>
     public static string GetName(string name, bool uppercaseFirst = true)
     {
-        var result = DashRegex.Replace(name, static m =>
+        var result = SeparatorRegex.Replace(name, static m =>
         {
             var g = m.Groups[1];
             return g.Success ? g.Value.ToUpperInvariant() : string.Empty;

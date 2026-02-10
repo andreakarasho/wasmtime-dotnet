@@ -141,7 +141,7 @@ public static class HostWriter
                 sb.AppendLine("{");
                 sb.IncrementIndent();
 
-                WriteItems(sb, world.Value.Definitions.Items, projectResolver);
+                WriteItems(sb, world.Value.Definitions.Items, projectResolver, className);
 
                 sb.DecrementIndent();
                 sb.AppendLine("}");
@@ -157,13 +157,15 @@ public static class HostWriter
 
                 // Fields
                 sb.AppendLine("private readonly global::Wasmtime.ComponentInstance _instance;");
+                sb.AppendLine("private readonly global::Wasmtime.Store _store;");
                 sb.AppendLine();
 
                 // Constructor
-                sb.Append("public ").Append(className).AppendLine("Exports(global::Wasmtime.ComponentInstance instance)");
+                sb.Append("public ").Append(className).AppendLine("Exports(global::Wasmtime.ComponentInstance instance, global::Wasmtime.Store store)");
                 sb.AppendLine("{");
                 sb.IncrementIndent();
                 sb.AppendLine("_instance = instance;");
+                sb.AppendLine("_store = store;");
                 sb.DecrementIndent();
                 sb.AppendLine("}");
                 sb.AppendLine();
@@ -186,24 +188,71 @@ public static class HostWriter
                 sb.AppendLine("{");
                 sb.IncrementIndent();
 
-                var imports = new List<(string, WitFuncType)>();
+                // imports now tracks: (abiName, instancePath, funcType)
+                var imports = new List<(string Name, string? InstancePath, WitFuncType Type)>();
+                // resourceDefs tracks: (resourceName, instancePath, typeId) for DefineResource calls
+                var resourceDefs = new List<(string ResourceName, string InstancePath, uint TypeId)>();
 
                 // Imports
+                uint nextResourceTypeId = 0;
                 foreach (var (name, type) in allImports)
                 {
-                    WriteImport(sb, name, type, imports, projectResolver);
+                    WriteImport(sb, name, type, imports, resourceDefs, projectResolver, ref nextResourceTypeId);
                 }
 
                 sb.AppendLine();
 
-                // Register method
+                // Register method — group by instance path
                 sb.AppendLine("unsafe void global::Wasmtime.IComponentImports.Register(global::Wasmtime.Linker linker)");
                 sb.AppendLine("{");
                 sb.IncrementIndent();
-                foreach (var (name, _) in imports)
+
+                // Root-level resources used by root-level imports must be defined before functions
+                var rootResourceDefs = CollectRootResourceDefs(imports, projectResolver);
+                foreach (var (resourceName, typeId) in rootResourceDefs)
                 {
+                    var dropMethodName = "ResourceDrop" + StringUtils.GetName(resourceName);
+                    sb.Append("linker.DefineResource(\"").Append(resourceName).Append("\", ").Append(typeId).Append(", ").Append(dropMethodName).AppendLine(");");
+                }
+
+                // Root-level imports (instancePath == null)
+                foreach (var (name, instancePath, _) in imports)
+                {
+                    if (instancePath != null) continue;
                     var importName = StringUtils.GetName(name);
                     sb.Append("linker.DefineFunction(\"").Append(name).Append("\", ").Append("Invoke").Append(importName).AppendLine(", this);");
+                }
+
+                // Instance-scoped imports (grouped by instancePath)
+                var instanceGroups = imports
+                    .Where(x => x.InstancePath != null)
+                    .GroupBy(x => x.InstancePath!);
+
+                // Build a lookup of resource defs per instance path
+                var resourcesByInstance = resourceDefs
+                    .GroupBy(x => x.InstancePath)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+                foreach (var group in instanceGroups)
+                {
+                    sb.AppendLine();
+                    var instanceVarName = "instance_" + group.Key.Replace(":", "_").Replace("/", "_");
+                    sb.Append("using var ").Append(instanceVarName).Append(" = linker.DefineInstance(\"").Append(group.Key).AppendLine("\");");
+
+                    // DefineResource for each resource in this instance
+                    if (resourcesByInstance.TryGetValue(group.Key, out var resources))
+                    {
+                        foreach (var res in resources)
+                        {
+                            var dropMethodName = "ResourceDrop" + StringUtils.GetName(res.ResourceName);
+                            sb.Append(instanceVarName).Append(".DefineResource(\"").Append(res.ResourceName).Append("\", ").Append(res.TypeId).Append(", ").Append(dropMethodName).AppendLine(");");
+                        }
+                    }
+
+                    foreach (var (name, _, _) in group)
+                    {
+                        var importName = StringUtils.GetName(name);
+                        sb.Append(instanceVarName).Append(".DefineFunction(\"").Append(name).Append("\", ").Append("Invoke").Append(importName).AppendLine(", this);");
+                    }
                 }
 
                 sb.DecrementIndent();
@@ -211,7 +260,7 @@ public static class HostWriter
                 sb.AppendLine();
 
                 // Import invokers
-                foreach (var (name, type) in imports)
+                foreach (var (name, _, type) in imports)
                 {
                     var resetter = sb.CreateResetter();
 
@@ -232,7 +281,8 @@ public static class HostWriter
             }
         }
 
-        WriteItems(sb, version.Definitions.Items, projectResolver);
+        var enclosingClassName = lastPart != null ? StringUtils.GetName(lastPart) : null;
+        WriteItems(sb, version.Definitions.Items, projectResolver, enclosingClassName);
 
         foreach (var unused in package.Key.AllParts)
         {
@@ -258,11 +308,15 @@ public static class HostWriter
         IndentedStringBuilder sb,
         string name,
         WitType type,
-        List<(string, WitFuncType)> imports,
-        ProjectTypeContainerResolver projectResolver)
+        List<(string Name, string? InstancePath, WitFuncType Type)> imports,
+        List<(string ResourceName, string InstancePath, uint TypeId)> resourceDefs,
+        ProjectTypeContainerResolver projectResolver,
+        ref uint nextResourceTypeId)
     {
+        WitCustomType? originalCustomType = null;
         if (type is WitCustomType customType)
         {
+            originalCustomType = customType;
             type = customType.Resolve(projectResolver);
         }
 
@@ -273,13 +327,53 @@ public static class HostWriter
             if (type is WitFuncType funcType)
             {
                 WriteImport(sb, funcType, name, projectResolver);
-                imports.Add((name, funcType));
+                imports.Add((name, null, funcType));
             }
             else if (type is WitInterfaceType interfaceType)
             {
+                // Determine the interface path for instance-scoped registration
+                string? interfacePath = null;
+                WitInterface? witInterface = null;
+
+                if (originalCustomType != null)
+                {
+                    // Resolve the package path for the interface
+                    interfacePath = BuildInterfacePath(originalCustomType);
+
+                    // Find the actual WitInterface to access resources
+                    try
+                    {
+                        var container = originalCustomType.GetContainer(projectResolver, allowContainer: true);
+                        if (container.TryGetContainer(originalCustomType.Name, out var interfaceContainer) &&
+                            interfaceContainer is WitInterface iface)
+                        {
+                            witInterface = iface;
+                        }
+                    }
+                    catch
+                    {
+                        // Fallback: no resource support for this interface
+                    }
+                }
+
+                // Write flat function imports from the interface
                 foreach (var field in interfaceType.Fields)
                 {
-                    WriteImport(sb, field.Name, field.Type, imports, projectResolver);
+                    if (field.Type is WitFuncType fieldFunc)
+                    {
+                        WriteImport(sb, fieldFunc, field.Name, projectResolver);
+                        imports.Add((field.Name, interfacePath, fieldFunc));
+                    }
+                    else
+                    {
+                        WriteImport(sb, field.Name, field.Type, imports, resourceDefs, projectResolver, ref nextResourceTypeId);
+                    }
+                }
+
+                // Write resource imports (constructor, methods, drop) from the interface
+                if (witInterface != null && interfacePath != null)
+                {
+                    WriteResourceImports(sb, interfacePath, witInterface, imports, resourceDefs, projectResolver, ref nextResourceTypeId);
                 }
             }
             else
@@ -291,6 +385,85 @@ public static class HostWriter
         {
             resetter.Reset();
             sb.AppendLine($"// Failed to generate function '{name}': {e.Message}");
+        }
+    }
+
+    private static string BuildInterfacePath(WitCustomType customType)
+    {
+        // Build the interface path like "tecs:ecs/ecs" from the custom type
+        return customType.Package.PackageName.FullName + "/" + customType.Name;
+    }
+
+    private static void WriteResourceImports(
+        IndentedStringBuilder sb,
+        string interfacePath,
+        WitInterface witInterface,
+        List<(string Name, string? InstancePath, WitFuncType Type)> imports,
+        List<(string ResourceName, string InstancePath, uint TypeId)> resourceDefs,
+        ITypeContainerResolver resolver,
+        ref uint nextResourceTypeId)
+    {
+        foreach (var item in witInterface.Definitions.Items)
+        {
+            if (item is not WitResource resource) continue;
+
+            var resName = resource.Name; // e.g., "system"
+            var resType = resource.Type; // WitResourceType — uses ResourceHostWriter
+            var typeId = nextResourceTypeId++;
+
+            // Set the type ID on the resource's HostWriter so generated code knows it
+            if (resType.HostWriter is ResourceHostWriter rhw)
+            {
+                rhw.TypeId = typeId;
+            }
+
+            resourceDefs.Add((resName, interfacePath, typeId));
+
+            // Constructor(s): [constructor]system
+            foreach (var ctor in resource.Constructors)
+            {
+                var ctorFunc = new WitFuncType(
+                    ctor.Parameters,
+                    new EquatableArray<WitType>(new WitType[] { resType })
+                );
+                var abiName = $"[constructor]{resName}";
+                WriteImport(sb, ctorFunc, abiName, resolver);
+                imports.Add((abiName, interfacePath, ctorFunc));
+            }
+
+            // Methods: [method]system.add-commands
+            foreach (var method in resource.Fields)
+            {
+                if (method.Type is WitFuncType methodFunc)
+                {
+                    // Prepend "self: resource" as first parameter
+                    var selfParam = new WitFuncParameter("self", resType);
+                    var allParams = new WitFuncParameter[methodFunc.Parameters.Length + 1];
+                    allParams[0] = selfParam;
+                    for (var i = 0; i < methodFunc.Parameters.Length; i++)
+                    {
+                        allParams[i + 1] = methodFunc.Parameters[i];
+                    }
+
+                    var withSelf = new WitFuncType(
+                        new EquatableArray<WitFuncParameter>(allParams),
+                        methodFunc.Results
+                    );
+
+                    var abiName = $"[method]{resName}.{method.Name}";
+                    WriteImport(sb, withSelf, abiName, resolver);
+                    imports.Add((abiName, interfacePath, withSelf));
+                }
+            }
+
+            // Drop: [resource-drop]system
+            var dropFunc = new WitFuncType(
+                new EquatableArray<WitFuncParameter>(new WitFuncParameter[] { new WitFuncParameter("self", resType) }),
+                new EquatableArray<WitType>(Array.Empty<WitType>())
+            );
+            var dropAbiName = $"[resource-drop]{resName}";
+            WriteImport(sb, dropFunc, dropAbiName, resolver);
+            imports.Add((dropAbiName, interfacePath, dropFunc));
         }
     }
 
@@ -328,7 +501,7 @@ public static class HostWriter
         }
     }
 
-    private static void WriteItems(IndentedStringBuilder sb, EquatableArray<WitTypeDef> valueItems, ITypeContainerResolver resolver)
+    private static void WriteItems(IndentedStringBuilder sb, EquatableArray<WitTypeDef> valueItems, ITypeContainerResolver resolver, string? enclosingClassName = null)
     {
         foreach (var item in valueItems)
         {
@@ -345,24 +518,179 @@ public static class HostWriter
             }
             else if (item is WitInterface interf)
             {
-                WriteInterface(sb, interf, resolver);
+                WriteInterface(sb, interf, resolver, enclosingClassName);
             }
             else if (item is WitEnumBase @enum)
             {
                 WriteEnum(sb, @enum);
+            }
+            else if (item is WitVariant variant)
+            {
+                WriteVariant(sb, variant, resolver);
+            }
+            else if (item is WitResource resource)
+            {
+                sb.AppendLine($"// resource {resource.Name} — handle methods generated on imports class");
             }
             else if (item is WitWorldInclude include)
             {
                 if (resolver.Resolve(include.Package) is WitPackageVersion version &&
                     version.Worlds.TryGetValue(include.WorldName, out var world))
                 {
-                    WriteItems(sb, world.Definitions.Items, resolver);
+                    WriteItems(sb, world.Definitions.Items, resolver, enclosingClassName);
                 }
             }
             else
             {
                 sb.AppendLine($"// Unsupported item of type '{item.GetType().Name}'");
             }
+        }
+    }
+
+    private static void WriteVariant(IndentedStringBuilder sb, WitVariant variant, ITypeContainerResolver resolver)
+    {
+        var name = StringUtils.GetName(variant.Name);
+        var hasPayloads = variant.Cases.Any(c => c.Type != null);
+
+        if (!hasPayloads)
+        {
+            // Simple variant (no payloads) — generate as enum + helper like WitEnum
+            sb.Append("public enum ").AppendLine(name);
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+
+            for (var i = 0; i < variant.Cases.Length; i++)
+            {
+                var c = StringUtils.GetName(variant.Cases[i].Name);
+                sb.AppendLine(i > 0 ? "," : "");
+                sb.Append(c).Append(" = ").Append(i);
+            }
+
+            sb.DecrementIndent();
+            sb.AppendLine();
+            sb.AppendLine("}");
+            sb.AppendLine();
+
+            // Generate helper class for enum-based variant serialization
+            sb.Append("public static class ").Append(name).AppendLine("Helper");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+
+            // ToByteVector
+            sb.Append("public static global::Wasmtime.ByteVector ToByteVector(").Append(name).AppendLine(" value)");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.AppendLine("switch (value)");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            for (var i = 0; i < variant.Cases.Length; i++)
+            {
+                var c = StringUtils.GetName(variant.Cases[i].Name);
+                sb.Append("case ").Append(name).Append('.').Append(c).Append(": return global::Wit.Constants.").Append(c).AppendLine(";");
+            }
+            sb.AppendLine("default: throw new global::System.InvalidOperationException($\"Invalid variant value: {value}\");");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+
+            // FromByteVector
+            sb.AppendLine();
+            sb.Append("public static ").Append(name).AppendLine(" FromByteVector(global::Wasmtime.ByteVector value)");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            for (var i = 0; i < variant.Cases.Length; i++)
+            {
+                var c = StringUtils.GetName(variant.Cases[i].Name);
+                sb.Append(i > 0 ? "else " : "").Append("if (value.Equals(global::Wit.Constants.").Append(c).AppendLine("))");
+                sb.AppendLine("{");
+                sb.IncrementIndent();
+                sb.Append("return ").Append(name).Append('.').Append(c).AppendLine(";");
+                sb.DecrementIndent();
+                sb.AppendLine("}");
+            }
+            sb.AppendLine("else");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.AppendLine("throw new global::System.InvalidOperationException($\"Invalid variant value: {value}\");");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+        else
+        {
+            // Variant with payloads — generate a struct with discriminant + payload
+            sb.Append("public struct ").AppendLine(name);
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+
+            // Discriminant enum
+            sb.Append("public enum Case").AppendLine();
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            for (var i = 0; i < variant.Cases.Length; i++)
+            {
+                var c = StringUtils.GetName(variant.Cases[i].Name);
+                sb.AppendLine(i > 0 ? "," : "");
+                sb.Append(c).Append(" = ").Append(i);
+            }
+            sb.DecrementIndent();
+            sb.AppendLine();
+            sb.AppendLine("}");
+            sb.AppendLine();
+
+            // Fields
+            sb.AppendLine("public Case Discriminant;");
+
+            // Payload fields for cases that have a type
+            foreach (var caseItem in variant.Cases)
+            {
+                if (caseItem.Type != null)
+                {
+                    var caseName = StringUtils.GetName(caseItem.Name);
+                    sb.Append("public ");
+                    caseItem.Type.HostWriter.WriteCSharpType(sb, resolver);
+                    sb.Append(' ').Append(caseName).AppendLine("Payload;");
+                }
+            }
+
+            sb.AppendLine();
+
+            // Static factory methods
+            foreach (var caseItem in variant.Cases)
+            {
+                var caseName = StringUtils.GetName(caseItem.Name);
+                if (caseItem.Type != null)
+                {
+                    sb.Append("public static ").Append(name).Append(" Create").Append(caseName).Append("(");
+                    caseItem.Type.HostWriter.WriteCSharpType(sb, resolver);
+                    sb.AppendLine(" value)");
+                    sb.AppendLine("{");
+                    sb.IncrementIndent();
+                    sb.Append("return new ").Append(name).Append(" { Discriminant = Case.").Append(caseName);
+                    sb.Append(", ").Append(caseName).AppendLine("Payload = value };");
+                    sb.DecrementIndent();
+                    sb.AppendLine("}");
+                }
+                else
+                {
+                    sb.Append("public static ").Append(name).Append(" Create").AppendLine(caseName).Append("()");
+                    sb.AppendLine("{");
+                    sb.IncrementIndent();
+                    sb.Append("return new ").Append(name).Append(" { Discriminant = Case.").Append(caseName).AppendLine(" };");
+                    sb.DecrementIndent();
+                    sb.AppendLine("}");
+                }
+            }
+
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
         }
     }
 
@@ -499,9 +827,16 @@ public static class HostWriter
         sb.AppendLine();
     }
 
-    private static void WriteInterface(IndentedStringBuilder sb, WitInterface interf, ITypeContainerResolver resolver)
+    private static void WriteInterface(IndentedStringBuilder sb, WitInterface interf, ITypeContainerResolver resolver, string? enclosingClassName = null)
     {
-        sb.Append("public class ").AppendLine(interf.CSharpName);
+        var name = interf.CSharpName;
+        // Avoid CS0542: member names cannot be the same as their enclosing type
+        if (name == enclosingClassName)
+        {
+            name += "_";
+        }
+
+        sb.Append("public class ").AppendLine(name);
         sb.AppendLine("{");
         sb.IncrementIndent();
 
@@ -616,6 +951,110 @@ public static class HostWriter
         sb.AppendLine("}");
     }
 
+    private static List<(string ResourceName, uint TypeId)> CollectRootResourceDefs(
+        List<(string Name, string? InstancePath, WitFuncType Type)> imports,
+        ITypeContainerResolver resolver)
+    {
+        var rootResources = new List<(string ResourceName, uint TypeId)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var (_, instancePath, funcType) in imports)
+        {
+            if (instancePath != null)
+            {
+                continue;
+            }
+
+            CollectRootResourceDefs(funcType, resolver, rootResources, seen);
+        }
+
+        return rootResources;
+    }
+
+    private static void CollectRootResourceDefs(
+        WitFuncType funcType,
+        ITypeContainerResolver resolver,
+        List<(string ResourceName, uint TypeId)> rootResources,
+        HashSet<string> seen)
+    {
+        foreach (var param in funcType.Parameters)
+        {
+            CollectRootResourceDefs(param.Type, resolver, rootResources, seen);
+        }
+
+        foreach (var result in funcType.Results)
+        {
+            CollectRootResourceDefs(result, resolver, rootResources, seen);
+        }
+    }
+
+    private static void CollectRootResourceDefs(
+        WitType type,
+        ITypeContainerResolver resolver,
+        List<(string ResourceName, uint TypeId)> rootResources,
+        HashSet<string> seen)
+    {
+        while (type is WitCustomType customType)
+        {
+            type = customType.Resolve(resolver);
+        }
+
+        switch (type)
+        {
+            case WitResourceType resourceType:
+            {
+                if (resourceType.HostWriter is ResourceHostWriter rhw && seen.Add(resourceType.Name))
+                {
+                    rootResources.Add((resourceType.Name, rhw.TypeId));
+                }
+                break;
+            }
+            case WitBorrowType borrowType:
+                CollectRootResourceDefs(borrowType.ElementType, resolver, rootResources, seen);
+                break;
+            case WitOptionType optionType:
+                CollectRootResourceDefs(optionType.ElementType, resolver, rootResources, seen);
+                break;
+            case WitListType listType:
+                CollectRootResourceDefs(listType.ElementType, resolver, rootResources, seen);
+                break;
+            case WitTupleType tupleType:
+                foreach (var element in tupleType.ElementTypes)
+                {
+                    CollectRootResourceDefs(element, resolver, rootResources, seen);
+                }
+                break;
+            case WitRecordType recordType:
+                foreach (var field in recordType.Fields)
+                {
+                    CollectRootResourceDefs(field.Type, resolver, rootResources, seen);
+                }
+                break;
+            case WitVariantType variantType:
+                foreach (var variantCase in variantType.Values)
+                {
+                    if (variantCase.Type != null)
+                    {
+                        CollectRootResourceDefs(variantCase.Type, resolver, rootResources, seen);
+                    }
+                }
+                break;
+            case WitResultType resultType:
+                CollectRootResourceDefs(resultType.OkType, resolver, rootResources, seen);
+                CollectRootResourceDefs(resultType.ErrType, resolver, rootResources, seen);
+                break;
+            case WitResultNoErrorType resultNoErrorType:
+                CollectRootResourceDefs(resultNoErrorType.OkType, resolver, rootResources, seen);
+                break;
+            case WitResultNoResultType resultNoResultType:
+                CollectRootResourceDefs(resultNoResultType.ErrType, resolver, rootResources, seen);
+                break;
+            case WitStreamType streamType:
+                CollectRootResourceDefs(streamType.ElementType, resolver, rootResources, seen);
+                break;
+        }
+    }
+
     private static void WriteExport(
         IndentedStringBuilder sb,
         WitFuncType funcType,
@@ -642,6 +1081,9 @@ public static class HostWriter
             sb.AppendLine(")");
             sb.AppendLine("{");
             sb.IncrementIndent();
+
+            // Provide store context for resource value creation in exports
+            sb.AppendLine("var context = global::Wasmtime.StoreContext.FromStore(_store);");
 
             if (funcType.Parameters.Length > 0)
             {
@@ -775,7 +1217,7 @@ public static class HostWriter
             var importName = StringUtils.GetName(name);
 
             sb.Append("private unsafe static void Invoke").Append(importName);
-            sb.AppendLine("(object state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results)");
+            sb.AppendLine("(object state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
             sb.AppendLine("{");
 
             sb.IncrementIndent();

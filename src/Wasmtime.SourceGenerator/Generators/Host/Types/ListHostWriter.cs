@@ -124,8 +124,9 @@ public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.Li
         sb.Append("for (int ").Append(indexName).Append(" = 0; ").Append(indexName).Append(" < ").Append(parameterName).Append(".Length; ").Append(indexName).AppendLine("++)");
         sb.AppendLine("{");
         sb.IncrementIndent();
+        ElementType.HostWriter.WriteValueGetterInitializer(sb, $"{builderName}[{indexName}]", $"{parameterName}_{indexName}", resolver);
         sb.Append(parameterName).Append("[").Append(indexName).Append("] = ");
-        ElementType.HostWriter.WriteValueGetter(sb, $"{builderName}[{indexName}]", parameterName + "_i", resolver);
+        ElementType.HostWriter.WriteValueGetter(sb, $"{builderName}[{indexName}]", $"{parameterName}_{indexName}", resolver);
         sb.AppendLine(";");
         sb.DecrementIndent();
         sb.AppendLine("}");

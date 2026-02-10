@@ -16,6 +16,12 @@ public class CustomHostWriter(WitCustomType type) : TypeHostWriter(WitTypeKind.U
     }
 
     /// <inheritdoc />
+    public override void WriteResultGetterInitializer(IndentedStringBuilder sb, string paramName, int index, ITypeContainerResolver resolver)
+    {
+        Resolve(resolver).WriteResultGetterInitializer(sb, paramName, index, resolver);
+    }
+
+    /// <inheritdoc />
     public override void WriteResultGetter(IndentedStringBuilder sb, string paramName, int index, ITypeContainerResolver resolver)
     {
         Resolve(resolver).WriteResultGetter(sb, paramName, index, resolver);

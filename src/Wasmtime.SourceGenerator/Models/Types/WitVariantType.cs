@@ -10,5 +10,5 @@ public record WitVariantType(
 {
     public string CSharpName { get; } = StringUtils.GetName(Name);
 
-    public override TypeHostWriter HostWriter => new VariantHostWriter(Package, CSharpName);
+    public override TypeHostWriter HostWriter => new VariantHostWriter(Package, CSharpName, Values);
 }

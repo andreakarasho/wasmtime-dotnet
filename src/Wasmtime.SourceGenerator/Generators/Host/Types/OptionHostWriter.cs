@@ -7,26 +7,52 @@ public class OptionHostWriter(WitType elementType) : TypeHostWriter(WitTypeKind.
     /// <inheritdoc />
     public override void WriteCSharpType(IndentedStringBuilder sb, ITypeContainerResolver resolver)
     {
-        sb.Append("global::Wasmtime.Option<");
         elementType.HostWriter.WriteCSharpType(sb, resolver);
-        sb.Append('>');
+        sb.Append('?');
+    }
+
+    /// <inheritdoc />
+    public override void WriteResultGetterInitializer(IndentedStringBuilder sb, string paramName, int index,
+        ITypeContainerResolver resolver)
+    {
+        // Create a temp variable for the option extraction:
+        // var opt_args_2 = args[2].ToOption();
+        // uint? optVal_args_2 = opt_args_2.HasValue ? opt_args_2.Value.ToUInt32() : null;
+        var safeName = $"{paramName}_{index}".ToSafeVariable();
+
+        sb.Append("var opt_").Append(safeName).Append(" = ").Append(paramName).Append("[").Append(index).AppendLine("].ToOption();");
+
+        // Declare the typed nullable variable
+        elementType.HostWriter.WriteCSharpType(sb, resolver);
+        sb.Append("? optVal_").Append(safeName).Append(" = opt_").Append(safeName);
+        sb.Append(".HasValue ? ");
+        elementType.HostWriter.WriteValueGetter(sb, $"opt_{safeName}.Value", safeName, resolver);
+        sb.AppendLine(" : null;");
+    }
+
+    /// <inheritdoc />
+    public override void WriteResultGetter(IndentedStringBuilder sb, string paramName, int index,
+        ITypeContainerResolver resolver)
+    {
+        var safeName = $"{paramName}_{index}".ToSafeVariable();
+        sb.Append("optVal_").Append(safeName);
     }
 
     /// <inheritdoc />
     public override void WriteValueGetter(IndentedStringBuilder sb, string paramName, string uniqueName,
         ITypeContainerResolver resolver)
     {
-        sb.Append(paramName).Append(".ToOption<");
-        elementType.HostWriter.WriteCSharpType(sb, resolver);
-        sb.Append(">()");
+        // Fallback for non-indexed usage: assumes paramName is already a ComponentValue
+        sb.Append(paramName).Append(".ToOption()");
     }
 
     /// <inheritdoc />
     protected override void WriteCreateComponentValue(IndentedStringBuilder sb, string paramKey,
         ITypeContainerResolver resolver, bool externallyOwned)
     {
-        sb.Append("global::Wasmtime.ComponentValue.CreateOption<");
-        WriteCSharpType(sb, resolver);
-        sb.Append(">(").Append(paramKey).Append(")");
+        sb.Append("global::Wasmtime.ComponentValue.CreateOption(");
+        sb.Append(paramKey).Append(" != null ? ");
+        elementType.HostWriter.WriteComponentValue(sb, paramKey + ".Value", ignoreDispose: true, resolver, externallyOwned);
+        sb.Append(" : (global::Wasmtime.ComponentValue?)null)");
     }
 }
