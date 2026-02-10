@@ -35,6 +35,21 @@ internal unsafe class ComponentCallResultsInternal : IDisposable
         _semaphore = semaphore;
     }
 
+    /// <summary>
+    /// Resets this instance without calling post_return or releasing the semaphore.
+    /// Used when the function call itself failed (error from wasmtime_component_func_call)
+    /// so post_return should not be called, but the thread-static state must be cleaned up.
+    /// The caller is responsible for releasing the semaphore separately.
+    /// </summary>
+    internal void Reset()
+    {
+        System.Array.Clear(Array, 0, Length);
+        _semaphore = null;
+        _context = null;
+        _func = default;
+        Length = 0;
+    }
+
     public void Dispose()
     {
         if (_semaphore is not {} semaphore)

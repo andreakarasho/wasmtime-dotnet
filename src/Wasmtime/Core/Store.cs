@@ -17,7 +17,7 @@ public sealed unsafe class Store : IDisposable
     internal wasmtime_context* Context;
     internal bool Disposed;
 
-    private wasmtime_wasip2_config_t* _wasiP2Config;
+    private wasi_config_t* _wasiP2Config;
 
     public Store(Engine engine)
     {
@@ -29,13 +29,13 @@ public sealed unsafe class Store : IDisposable
 
     public void AddWasiP2(bool inheritStdin = false, bool inheritStdout = false, bool inheritStderr = false)
     {
-        var cfg = wasmtime_wasip2_config_new();
+        var cfg = wasi_config_new();
 
-        if (inheritStdin) wasmtime_wasip2_config_inherit_stdin(cfg);
-        if (inheritStdout) wasmtime_wasip2_config_inherit_stdout(cfg);
-        if (inheritStderr) wasmtime_wasip2_config_inherit_stderr(cfg);
+        if (inheritStdin) wasi_config_inherit_stdin(cfg);
+        if (inheritStdout) wasi_config_inherit_stdout(cfg);
+        if (inheritStderr) wasi_config_inherit_stderr(cfg);
 
-        wasmtime_context_set_wasip2(Context, cfg);
+        wasmtime_context_set_wasi(Context, cfg);
 
         _wasiP2Config = cfg;
     }

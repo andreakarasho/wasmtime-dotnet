@@ -113,6 +113,9 @@ public unsafe class ComponentInstance
         }
         catch
         {
+            // Reset the thread-static instance so it's not left dirty for the next call.
+            // Don't call Dispose (which invokes post_return) since the call itself failed.
+            ComponentCallResultsInternal.ThreadInstance.Reset();
             Lock.Release();
             throw;
         }

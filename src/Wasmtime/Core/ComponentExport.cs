@@ -8,7 +8,7 @@ using Wasmtime.Interop;
 
 namespace Wasmtime;
 
-public unsafe delegate void ComponentFunctionDelegate(object? state, ComponentCallResults args, ComponentValue* results);
+public unsafe delegate void ComponentFunctionDelegate(object? state, ComponentCallResults args, ComponentValue* results, StoreContext context);
 
 internal record struct ComponentFunction(
     object? State,
@@ -22,7 +22,7 @@ internal unsafe class ComponentExport
     /// </summary>
     private const int MaxFunctions = 1024;
 
-    public static readonly delegate* unmanaged[Cdecl] <void*, wasmtime_context*, wasmtime_component_val*, nuint, wasmtime_component_val*, nuint, wasmtime_error*> CallerPtr = &Caller;
+    public static readonly delegate* unmanaged[Cdecl] <void*, wasmtime_context*, void*, wasmtime_component_val*, nuint, wasmtime_component_val*, nuint, wasmtime_error*> CallerPtr = &Caller;
 
     private static readonly ConcurrentDictionary<nint, ComponentFunction> RegisteredFunctions = new();
     private static int FunctionId;
@@ -37,6 +37,7 @@ internal unsafe class ComponentExport
     private static wasmtime_error* Caller(
         void* data,
         wasmtime_context* context,
+        void* funcType,
         wasmtime_component_val* argsPtr,
         nuint nargs,
         wasmtime_component_val* resultsPtr,
@@ -50,7 +51,7 @@ internal unsafe class ComponentExport
         {
             try
             {
-                function.Function(function.State, args, (ComponentValue*)resultsPtr);
+                function.Function(function.State, args, (ComponentValue*)resultsPtr, new StoreContext(context));
                 return null;
             }
             catch (Exception ex)
