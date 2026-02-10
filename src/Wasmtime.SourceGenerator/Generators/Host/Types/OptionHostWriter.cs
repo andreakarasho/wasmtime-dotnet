@@ -50,9 +50,26 @@ public class OptionHostWriter(WitType elementType) : TypeHostWriter(WitTypeKind.
     protected override void WriteCreateComponentValue(IndentedStringBuilder sb, string paramKey,
         ITypeContainerResolver resolver, bool externallyOwned)
     {
+        // For reference types (e.g., resource classes in import context), the nullable is a
+        // reference type annotation (T?) not Nullable<T>, so we use the variable directly
+        // instead of .Value which only exists on Nullable<T> value types.
+        var isRefType = IsResourceClassType(elementType, resolver);
+        var valueKey = isRefType ? paramKey : paramKey + ".Value";
+
         sb.Append("global::Wasmtime.ComponentValue.CreateOption(");
         sb.Append(paramKey).Append(" != null ? ");
-        elementType.HostWriter.WriteComponentValue(sb, paramKey + ".Value", ignoreDispose: true, resolver, externallyOwned);
+        elementType.HostWriter.WriteComponentValue(sb, valueKey, ignoreDispose: true, resolver, externallyOwned);
         sb.Append(" : (global::Wasmtime.ComponentValue?)null)");
+    }
+
+    private static bool IsResourceClassType(WitType type, ITypeContainerResolver resolver)
+    {
+        var resolved = type;
+        while (resolved is WitCustomType customType)
+            resolved = customType.Resolve(resolver);
+
+        return resolved is WitResourceType resourceType
+            && resourceType.HostWriter is ResourceHostWriter { ClassName: not null }
+            && !ResourceHostWriter.ExportContext;
     }
 }

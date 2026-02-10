@@ -9,14 +9,30 @@ public class BorrowHostWriter(
     /// <inheritdoc />
     public override void WriteCSharpType(IndentedStringBuilder sb, ITypeContainerResolver resolver)
     {
-        sb.Append("uint");
+        var rhw = ResolveResourceHostWriter(resolver);
+        if (!ResourceHostWriter.ExportContext && rhw?.ClassName != null)
+        {
+            sb.Append(rhw.ClassName);
+        }
+        else
+        {
+            sb.Append("uint");
+        }
     }
 
     /// <inheritdoc />
     public override void WriteValueGetter(IndentedStringBuilder sb, string paramName, string uniqueName,
         ITypeContainerResolver resolver)
     {
-        sb.Append(paramName).Append(".ToResourceRep(context)");
+        var rhw = ResolveResourceHostWriter(resolver);
+        if (!ResourceHostWriter.ExportContext && rhw?.HandleTableField != null)
+        {
+            sb.Append("@this.").Append(rhw.HandleTableField).Append("[").Append(paramName).Append(".ToResourceRep(context)]");
+        }
+        else
+        {
+            sb.Append(paramName).Append(".ToResourceRep(context)");
+        }
     }
 
     /// <inheritdoc />
@@ -28,7 +44,7 @@ public class BorrowHostWriter(
         sb.Append("global::Wasmtime.ComponentValue.CreateBorrowResource(context, ").Append(paramKey).Append(", ").Append(typeId).Append(")");
     }
 
-    private uint ResolveResourceTypeId(ITypeContainerResolver resolver)
+    private ResourceHostWriter? ResolveResourceHostWriter(ITypeContainerResolver resolver)
     {
         var resolved = elementType;
         while (resolved is WitCustomType customType)
@@ -38,9 +54,14 @@ public class BorrowHostWriter(
 
         if (resolved is WitResourceType resourceType && resourceType.HostWriter is ResourceHostWriter rhw)
         {
-            return rhw.TypeId;
+            return rhw;
         }
 
-        return 0;
+        return null;
+    }
+
+    private uint ResolveResourceTypeId(ITypeContainerResolver resolver)
+    {
+        return ResolveResourceHostWriter(resolver)?.TypeId ?? 0;
     }
 }

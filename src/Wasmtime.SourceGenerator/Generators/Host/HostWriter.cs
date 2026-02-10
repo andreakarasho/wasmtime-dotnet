@@ -92,6 +92,7 @@ public static class HostWriter
         nameBuilder.Clear();
         sb.Clear();
 
+        sb.AppendLine("#nullable enable");
         sb.AppendLine("internal static partial class Wit");
         sb.AppendLine("{");
 
@@ -150,6 +151,9 @@ public static class HostWriter
 
             if (allExports.Length > 0)
             {
+                // Export methods must use uint for resource types (nested classes not in scope)
+                ResourceHostWriter.ExportContext = true;
+
                 sb.Append("public partial class ").Append(className).AppendLine("Exports");
 
                 sb.AppendLine("{");
@@ -179,6 +183,8 @@ public static class HostWriter
                 sb.DecrementIndent();
                 sb.AppendLine("}");
                 sb.AppendLine();
+
+                ResourceHostWriter.ExportContext = false;
             }
 
             if (allImports.Length > 0)
@@ -211,8 +217,7 @@ public static class HostWriter
                 var rootResourceDefs = CollectRootResourceDefs(imports, projectResolver);
                 foreach (var (resourceName, typeId) in rootResourceDefs)
                 {
-                    var dropMethodName = "ResourceDrop" + StringUtils.GetName(resourceName);
-                    sb.Append("linker.DefineResource(\"").Append(resourceName).Append("\", ").Append(typeId).Append(", ").Append(dropMethodName).AppendLine(");");
+                    sb.Append("linker.DefineResource(\"").Append(resourceName).Append("\", ").Append(typeId).AppendLine(");");
                 }
 
                 // Root-level imports (instancePath == null)
@@ -243,8 +248,7 @@ public static class HostWriter
                     {
                         foreach (var res in resources)
                         {
-                            var dropMethodName = "ResourceDrop" + StringUtils.GetName(res.ResourceName);
-                            sb.Append(instanceVarName).Append(".DefineResource(\"").Append(res.ResourceName).Append("\", ").Append(res.TypeId).Append(", ").Append(dropMethodName).AppendLine(");");
+                            sb.Append(instanceVarName).Append(".DefineResource(\"").Append(res.ResourceName).Append("\", ").Append(res.TypeId).AppendLine(");");
                         }
                     }
 
@@ -403,21 +407,161 @@ public static class HostWriter
         ITypeContainerResolver resolver,
         ref uint nextResourceTypeId)
     {
+        // Pass 1: Set all ResourceHostWriter properties BEFORE generating any code.
+        // This ensures that when resource A references borrow<resource B> in its methods,
+        // resource B's ClassName/HandleTableField are already set, producing the correct type.
+        var resourceInfos = new List<(WitResource Resource, string ResName, string ClassName,
+            string HandleTableField, string HandleCounterField, string RegisterMethodName, string DropMethodName, uint TypeId)>();
+
         foreach (var item in witInterface.Definitions.Items)
         {
             if (item is not WitResource resource) continue;
 
-            var resName = resource.Name; // e.g., "system"
-            var resType = resource.Type; // WitResourceType — uses ResourceHostWriter
+            var resName = resource.Name;
+            var resType = resource.Type;
             var typeId = nextResourceTypeId++;
+            var className = StringUtils.GetName(resName);
+            var fieldName = "_" + StringUtils.GetName(resName, uppercaseFirst: false);
+            var handleTableField = fieldName + "Handles";
+            var handleCounterField = "_next" + className + "Handle";
+            var registerMethodName = "Register" + className;
+            var dropMethodName = "Drop" + className;
 
-            // Set the type ID on the resource's HostWriter so generated code knows it
             if (resType.HostWriter is ResourceHostWriter rhw)
             {
                 rhw.TypeId = typeId;
+                rhw.ClassName = className;
+                rhw.HandleTableField = handleTableField;
+                rhw.HandleCounterField = handleCounterField;
+                rhw.StoreMethodName = registerMethodName;
             }
 
             resourceDefs.Add((resName, interfacePath, typeId));
+            resourceInfos.Add((resource, resName, className, handleTableField, handleCounterField, registerMethodName, dropMethodName, typeId));
+        }
+
+        // Pass 1.5: Emit public type ID constants
+        foreach (var (resource, resName, className, handleTableField, handleCounterField, registerMethodName, dropMethodName, typeId) in resourceInfos)
+        {
+            sb.Append("public const uint ").Append(className).Append("TypeId = ").Append(typeId).AppendLine(";");
+        }
+        sb.AppendLine();
+
+        // Pass 2: Generate code now that all resource properties are set.
+        foreach (var (resource, resName, className, handleTableField, handleCounterField, registerMethodName, dropMethodName, typeId) in resourceInfos)
+        {
+            var resType = resource.Type;
+
+            // --- Emit handle table field, counter, free list, and debug generation tracking ---
+            sb.Append("private readonly global::System.Collections.Generic.Dictionary<uint, ").Append(className).Append("> ")
+                .Append(handleTableField).Append(" = new global::System.Collections.Generic.Dictionary<uint, ").Append(className).AppendLine(">();");
+            sb.Append("private uint ").Append(handleCounterField).AppendLine(" = 1;");
+            sb.Append("private readonly global::System.Collections.Generic.Stack<uint> _free").Append(className).AppendLine("Handles = new();");
+            sb.AppendLine("#if DEBUG");
+            sb.Append("private readonly global::System.Collections.Generic.Dictionary<uint, uint> _").Append(StringUtils.GetName(resName, uppercaseFirst: false)).AppendLine("Generations = new();");
+            sb.Append("private uint _").Append(StringUtils.GetName(resName, uppercaseFirst: false)).AppendLine("Generation = 0;");
+            sb.AppendLine("#endif");
+            sb.AppendLine();
+
+            // --- Emit nested abstract class ---
+            sb.Append("public abstract class ").Append(className).AppendLine(" : global::System.IDisposable");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+
+            // Methods on the nested class
+            foreach (var method in resource.Fields)
+            {
+                if (method.Type is WitFuncType methodFunc)
+                {
+                    var methodName = StringUtils.GetName(method.Name);
+                    sb.Append("public abstract ");
+                    WriteParameters(sb, resolver, methodFunc.Results);
+                    sb.Append(' ').Append(methodName).Append('(');
+
+                    for (var i = 0; i < methodFunc.Parameters.Length; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        var param = methodFunc.Parameters[i];
+                        param.Type.HostWriter.WriteParameter(sb, param.CSharpVariableName, resolver);
+                    }
+
+                    sb.AppendLine(");");
+                }
+            }
+
+            // Dispose method
+            sb.AppendLine("public abstract void Dispose();");
+
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
+
+            // --- Emit factory method for constructors ---
+            foreach (var ctor in resource.Constructors)
+            {
+                var factoryName = "New" + className;
+                sb.Append("public abstract ").Append(className).Append(' ').Append(factoryName).Append('(');
+
+                for (var i = 0; i < ctor.Parameters.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    var param = ctor.Parameters[i];
+                    param.Type.HostWriter.WriteParameter(sb, param.CSharpVariableName, resolver);
+                }
+
+                sb.AppendLine(");");
+            }
+
+            // --- Emit Register method (public, for host-created resources) ---
+            var genField = "_" + StringUtils.GetName(resName, uppercaseFirst: false) + "Generation";
+            var gensField = "_" + StringUtils.GetName(resName, uppercaseFirst: false) + "Generations";
+            sb.Append("public uint ").Append(registerMethodName).Append("(").Append(className).AppendLine(" obj)");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.Append("var h = _free").Append(className).Append("Handles.Count > 0 ? _free").Append(className).Append("Handles.Pop() : checked(").Append(handleCounterField).AppendLine("++);");
+            sb.Append(handleTableField).AppendLine("[h] = obj;");
+            sb.AppendLine("#if DEBUG");
+            sb.Append(gensField).Append("[h] = ++").Append(genField).AppendLine(";");
+            sb.AppendLine("#endif");
+            sb.AppendLine("return h;");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
+
+            // --- Emit Drop helper (protected, called by InvokeDrop and available for subclass cleanup) ---
+            sb.Append("protected void ").Append(dropMethodName).AppendLine("(uint handle)");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.Append("if (").Append(handleTableField).AppendLine(".Remove(handle, out var obj))");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.Append("_free").Append(className).AppendLine("Handles.Push(handle);");
+            sb.AppendLine("#if DEBUG");
+            sb.Append(gensField).Append("[handle] = ++").Append(genField).AppendLine(";");
+            sb.AppendLine("#endif");
+            sb.AppendLine("obj.Dispose();");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
+
+            // --- Emit debug-only validated lookup helper ---
+            sb.AppendLine("#if DEBUG");
+            sb.Append("private ").Append(className).Append(" Get").Append(className).AppendLine("(uint handle)");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.Append("if (!").Append(handleTableField).AppendLine(".TryGetValue(handle, out var obj))");
+            sb.IncrementIndent();
+            sb.Append("throw new global::System.InvalidOperationException($\"Invalid ").Append(className).AppendLine(" handle: {handle}\");");
+            sb.DecrementIndent();
+            sb.AppendLine("return obj;");
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine("#endif");
+            sb.AppendLine();
+
+            // --- Still add imports for Invoke generation (ABI names stay the same) ---
 
             // Constructor(s): [constructor]system
             foreach (var ctor in resource.Constructors)
@@ -427,16 +571,14 @@ public static class HostWriter
                     new EquatableArray<WitType>(new WitType[] { resType })
                 );
                 var abiName = $"[constructor]{resName}";
-                WriteImport(sb, ctorFunc, abiName, resolver);
                 imports.Add((abiName, interfacePath, ctorFunc));
             }
 
-            // Methods: [method]system.add-commands
+            // Methods: [method]system.add-commands — with self prepended for ABI
             foreach (var method in resource.Fields)
             {
                 if (method.Type is WitFuncType methodFunc)
                 {
-                    // Prepend "self: resource" as first parameter
                     var selfParam = new WitFuncParameter("self", resType);
                     var allParams = new WitFuncParameter[methodFunc.Parameters.Length + 1];
                     allParams[0] = selfParam;
@@ -451,7 +593,6 @@ public static class HostWriter
                     );
 
                     var abiName = $"[method]{resName}.{method.Name}";
-                    WriteImport(sb, withSelf, abiName, resolver);
                     imports.Add((abiName, interfacePath, withSelf));
                 }
             }
@@ -462,7 +603,6 @@ public static class HostWriter
                 new EquatableArray<WitType>(Array.Empty<WitType>())
             );
             var dropAbiName = $"[resource-drop]{resName}";
-            WriteImport(sb, dropFunc, dropAbiName, resolver);
             imports.Add((dropAbiName, interfacePath, dropFunc));
         }
     }
@@ -1085,6 +1225,7 @@ public static class HostWriter
             // Provide store context for resource value creation in exports
             sb.AppendLine("var context = global::Wasmtime.StoreContext.FromStore(_store);");
 
+            int parameterSize;
             if (funcType.Parameters.Length > 0)
             {
                 var length = sb.Length;
@@ -1097,7 +1238,7 @@ public static class HostWriter
 
                 if (sb.Length > length) sb.AppendLine();
 
-                var parameterSize = funcType.Parameters.Sum(p => p.Type.HostWriter.GetParameterSize(resolver));
+                parameterSize = funcType.Parameters.Sum(p => p.Type.HostWriter.GetParameterSize(resolver));
 
                 sb.Append("global::Wasmtime.ComponentValue* parameters = ")
                     .Append("stackalloc global::Wasmtime.ComponentValue[")
@@ -1115,15 +1256,21 @@ public static class HostWriter
             }
             else
             {
+                parameterSize = 0;
                 sb.AppendLine("global::Wasmtime.ComponentValue* parameters = null;");
             }
+
+            // Wrap call + result handling in try/finally to dispose parameter native wrappers
+            sb.AppendLine("try");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
 
             sb.Append("using global::Wasmtime.ComponentCallResults result = _instance.Call(\"")
                 .Append(name)
                 .Append("\", ")
                 .Append(funcType.Results.Length)
                 .Append(", parameters, ")
-                .Append(funcType.Parameters.Length)
+                .Append(parameterSize)
                 .AppendLine(");");
 
             if (funcType.Results.Length > 0)
@@ -1154,6 +1301,23 @@ public static class HostWriter
                 sb.AppendLine();
                 sb.DecrementIndent();
                 sb.AppendLine(");");
+            }
+
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+
+            // Dispose native wrappers for parameters (resources, options, records, etc.)
+            if (parameterSize > 0)
+            {
+                sb.AppendLine("finally");
+                sb.AppendLine("{");
+                sb.IncrementIndent();
+                sb.Append("for (int _i = 0; _i < ").Append(parameterSize).AppendLine("; _i++)");
+                sb.IncrementIndent();
+                sb.AppendLine("parameters[_i].Dispose(_store);");
+                sb.DecrementIndent();
+                sb.DecrementIndent();
+                sb.AppendLine("}");
             }
 
             sb.DecrementIndent();
@@ -1214,14 +1378,32 @@ public static class HostWriter
 
         try
         {
+            // Detect resource ABI name patterns
+            if (name.StartsWith("[constructor]"))
+            {
+                WriteConstructorInvoke(sb, className, funcType, name, resolver);
+                return;
+            }
+            if (name.StartsWith("[method]"))
+            {
+                WriteMethodInvoke(sb, className, funcType, name, resolver);
+                return;
+            }
+            if (name.StartsWith("[resource-drop]"))
+            {
+                WriteDropInvoke(sb, className, funcType, name, resolver);
+                return;
+            }
+
+            // Generic path for non-resource imports
             var importName = StringUtils.GetName(name);
 
             sb.Append("private unsafe static void Invoke").Append(importName);
-            sb.AppendLine("(object state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
+            sb.AppendLine("(object? state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
             sb.AppendLine("{");
 
             sb.IncrementIndent();
-            sb.Append("var @this = (").Append(className).Append("Imports").AppendLine(")state;");
+            sb.Append("var @this = (").Append(className).Append("Imports").AppendLine(")state!;");
             sb.AppendLine();
 
             if (funcType.Parameters.Length > 0)
@@ -1299,6 +1481,216 @@ public static class HostWriter
             {
             }
         }
+    }
+
+    /// <summary>
+    /// Generates Invoke for [constructor]resource — calls factory, stores in table, returns handle.
+    /// </summary>
+    private static void WriteConstructorInvoke(IndentedStringBuilder sb,
+        string className,
+        WitFuncType funcType,
+        string name,
+        ITypeContainerResolver resolver)
+    {
+        var importName = StringUtils.GetName(name);
+        var resName = name.Substring("[constructor]".Length);
+        var resClassName = StringUtils.GetName(resName);
+        var factoryName = "New" + resClassName;
+
+        // Resolve the resource HostWriter for handle table info
+        var rhw = ResolveResourceHostWriter(funcType.Results.Length > 0 ? funcType.Results[0] : null, resolver);
+
+        sb.Append("private unsafe static void Invoke").Append(importName);
+        sb.AppendLine("(object? state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.Append("var @this = (").Append(className).Append("Imports").AppendLine(")state!;");
+        sb.AppendLine();
+
+        // Extract constructor parameters
+        if (funcType.Parameters.Length > 0)
+        {
+            for (var i = 0; i < funcType.Parameters.Length; i++)
+            {
+                var param = funcType.Parameters[i];
+                param.Type.HostWriter.WriteResultGetterInitializer(sb, "args", i, resolver);
+            }
+        }
+
+        // Call factory method
+        sb.Append("var obj = @this.").Append(factoryName);
+        if (funcType.Parameters.Length > 0)
+        {
+            sb.Append('(');
+            for (var i = 0; i < funcType.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var param = funcType.Parameters[i];
+                param.Type.HostWriter.WriteResultGetter(sb, "args", i, resolver);
+            }
+            sb.AppendLine(");");
+        }
+        else
+        {
+            sb.AppendLine("();");
+        }
+
+        // Store in handle table and return handle
+        if (rhw != null)
+        {
+            sb.Append("var handle = @this.").Append(rhw.StoreMethodName!).AppendLine("(obj);");
+            sb.Append("results[0] = global::Wasmtime.ComponentValue.CreateOwnResource(context, handle, ").Append(rhw.TypeId).AppendLine(");");
+        }
+
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+        sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Generates Invoke for [method]resource.method — looks up self, calls method on object.
+    /// </summary>
+    private static void WriteMethodInvoke(IndentedStringBuilder sb,
+        string className,
+        WitFuncType funcType,
+        string name,
+        ITypeContainerResolver resolver)
+    {
+        var importName = StringUtils.GetName(name);
+
+        // Parse: [method]system.add-commands → resource="system", method="add-commands"
+        var afterPrefix = name.Substring("[method]".Length);
+        var dotIndex = afterPrefix.IndexOf('.');
+        var methodName = dotIndex >= 0 ? StringUtils.GetName(afterPrefix.Substring(dotIndex + 1)) : importName;
+
+        // Self is the first parameter — resolve its resource type
+        var selfType = funcType.Parameters[0].Type;
+        var selfRhw = ResolveResourceHostWriter(selfType, resolver);
+
+        sb.Append("private unsafe static void Invoke").Append(importName);
+        sb.AppendLine("(object? state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.Append("var @this = (").Append(className).Append("Imports").AppendLine(")state!;");
+        sb.AppendLine();
+
+        // Look up self from handle table (debug build validates handle)
+        if (selfRhw != null)
+        {
+            sb.AppendLine("#if DEBUG");
+            sb.Append("var self = @this.Get").Append(selfRhw.ClassName!).AppendLine("(args[0].ToResourceRep(context));");
+            sb.AppendLine("#else");
+            sb.Append("var self = @this.").Append(selfRhw.HandleTableField!).AppendLine("[args[0].ToResourceRep(context)];");
+            sb.AppendLine("#endif");
+        }
+        else
+        {
+            sb.AppendLine("var self = args[0].ToResourceRep(context);");
+        }
+
+        // Extract remaining parameters (indices 1+)
+        for (var i = 1; i < funcType.Parameters.Length; i++)
+        {
+            var param = funcType.Parameters[i];
+            param.Type.HostWriter.WriteResultGetterInitializer(sb, "args", i, resolver);
+        }
+
+        // Call method on self and handle return
+        if (funcType.Results.Length > 0)
+        {
+            WriteParameters(sb, resolver, funcType.Results);
+            sb.Append(" result = ");
+        }
+
+        sb.Append("self.").Append(methodName);
+
+        if (funcType.Parameters.Length > 1)
+        {
+            sb.Append('(');
+            sb.IncrementIndent();
+            for (var i = 1; i < funcType.Parameters.Length; i++)
+            {
+                sb.AppendLine(i > 1 ? "," : "");
+                var param = funcType.Parameters[i];
+                param.Type.HostWriter.WriteResultGetter(sb, "args", i, resolver);
+            }
+            sb.DecrementIndent();
+            sb.AppendLine();
+            sb.AppendLine(");");
+        }
+        else
+        {
+            sb.AppendLine("();");
+        }
+
+        // Handle return values
+        if (funcType.Results.Length > 0)
+        {
+            sb.AppendLine();
+
+            for (var i = 0; i < funcType.Results.Length; i++)
+            {
+                var param = funcType.Results[i];
+                var variable = GetName(funcType, i);
+                param.HostWriter.WriteParameterInitializer(sb, variable, resolver, ignoreDispose: true, externallyOwned: true);
+            }
+
+            for (var i = 0; i < funcType.Results.Length; i++)
+            {
+                var variable = GetName(funcType, i);
+                var param = funcType.Results[i];
+                param.HostWriter.WriteParameterSetter(sb, "results", variable, i, ignoreDispose: true, resolver, externallyOwned: true);
+                i += param.HostWriter.GetParameterSize(resolver);
+            }
+        }
+
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+        sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Generates Invoke for [resource-drop]resource — looks up, removes, disposes.
+    /// </summary>
+    private static void WriteDropInvoke(IndentedStringBuilder sb,
+        string className,
+        WitFuncType funcType,
+        string name,
+        ITypeContainerResolver resolver)
+    {
+        var importName = StringUtils.GetName(name);
+        var resName = name.Substring("[resource-drop]".Length);
+        var dropMethodName = "Drop" + StringUtils.GetName(resName);
+
+        sb.Append("private unsafe static void Invoke").Append(importName);
+        sb.AppendLine("(object? state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.Append("var @this = (").Append(className).Append("Imports").AppendLine(")state!;");
+        sb.Append("@this.").Append(dropMethodName).AppendLine("(args[0].ToResourceRepAndDrop(context));");
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+        sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Resolves a WitType to its ResourceHostWriter if it is a resource type.
+    /// </summary>
+    private static ResourceHostWriter? ResolveResourceHostWriter(WitType? type, ITypeContainerResolver resolver)
+    {
+        if (type == null) return null;
+
+        while (type is WitCustomType customType)
+        {
+            type = customType.Resolve(resolver);
+        }
+
+        if (type is WitResourceType resourceType && resourceType.HostWriter is ResourceHostWriter rhw)
+        {
+            return rhw;
+        }
+
+        return null;
     }
 
     private static string GetName(WitFuncType funcType, int i)

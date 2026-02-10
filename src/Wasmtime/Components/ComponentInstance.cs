@@ -95,6 +95,8 @@ public unsafe class ComponentInstance
             var results = ComponentCallResultsInternal.ThreadInstance;
             results.Initialize(resultCount, function.Function, _store.Context, Lock);
 
+            ComponentBorrowTracker.BeginCall();
+
             fixed (ComponentValue* resultsPtr = results.Array)
             {
                 var error = wasmtime_component_func_call(
@@ -116,6 +118,7 @@ public unsafe class ComponentInstance
             // Reset the thread-static instance so it's not left dirty for the next call.
             // Don't call Dispose (which invokes post_return) since the call itself failed.
             ComponentCallResultsInternal.ThreadInstance.Reset();
+            ComponentBorrowTracker.AbortCall();
             Lock.Release();
             throw;
         }

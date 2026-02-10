@@ -44,15 +44,15 @@ internal unsafe class ComponentExport
         nuint nresults)
     {
         var args = new ComponentCallResults(argsPtr, (int)nargs);
+        ComponentBorrowTracker.TrackArgs(argsPtr, (int)nargs);
 
-        string errorMessage;
+        string? errorMessage = null;
 
         if (RegisteredFunctions.TryGetValue((nint)data, out var function))
         {
             try
             {
                 function.Function(function.State, args, (ComponentValue*)resultsPtr, new StoreContext(context));
-                return null;
             }
             catch (Exception ex)
             {
@@ -62,6 +62,11 @@ internal unsafe class ComponentExport
         else
         {
             errorMessage = "Function not found";
+        }
+
+        if (errorMessage is null)
+        {
+            return null;
         }
 
         var bytes = Encoding.UTF8.GetMaxByteCount(errorMessage.Length) <= 255

@@ -17,28 +17,36 @@ internal unsafe static class ComponentResourceDestructor
             return null;
         }
 
-        var handle = GCHandle.FromIntPtr((nint)data);
-        if (handle.Target is not Action<uint> action)
-        {
-            return null;
-        }
-
         try
         {
+            var handle = GCHandle.FromIntPtr((nint)data);
+            if (!handle.IsAllocated || handle.Target is not Action<uint> action)
+            {
+                return null;
+            }
+
             action(rep);
             return null;
         }
         catch (Exception ex)
         {
-            var message = ex.Message;
-            var bytes = new byte[System.Text.Encoding.UTF8.GetByteCount(message) + 1];
-
-            fixed (char* utf16 = message)
-            fixed (byte* utf8 = bytes)
+            // Never throw across the unmanaged boundary; return an error if possible.
+            try
             {
-                var len = System.Text.Encoding.UTF8.GetBytes(utf16, message.Length, utf8, bytes.Length - 1);
-                bytes[len] = 0;
-                return wasmtime_error_new(utf8);
+                var message = ex.Message;
+                var bytes = new byte[System.Text.Encoding.UTF8.GetByteCount(message) + 1];
+
+                fixed (char* utf16 = message)
+                fixed (byte* utf8 = bytes)
+                {
+                    var len = System.Text.Encoding.UTF8.GetBytes(utf16, message.Length, utf8, bytes.Length - 1);
+                    bytes[len] = 0;
+                    return wasmtime_error_new(utf8);
+                }
+            }
+            catch
+            {
+                return null;
             }
         }
     }

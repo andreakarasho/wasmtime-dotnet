@@ -57,6 +57,8 @@ internal unsafe class ComponentCallResultsInternal : IDisposable
             throw new ObjectDisposedException(nameof(ComponentCallResultsInternal));
         }
 
+        ComponentBorrowTracker.EndCall(_context);
+
         fixed (wasmtime_component_func* ptr = &_func)
         {
             wasmtime_component_func_post_return(ptr, _context);
