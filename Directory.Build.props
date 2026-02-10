@@ -2,7 +2,7 @@
   <PropertyGroup>
     <WasmtimePackagePrefix>GerardSmit.Wasmtime</WasmtimePackagePrefix>
     <DevBuild>false</DevBuild>
-    <WasmtimeVersion>36.0.2</WasmtimeVersion>
+    <WasmtimeVersion>39.0.2</WasmtimeVersion>
     <WasmtimePackageVersion>$(WasmtimeVersion)-alpha.7</WasmtimePackageVersion>
   </PropertyGroup>
 </Project>
