@@ -1231,10 +1231,11 @@ public static class HostWriter
             {
                 var length = sb.Length;
 
+                // ignoreDispose: true — wasmtime_component_func_call takes ownership of parameter data
                 for (var index = 0; index < funcType.Parameters.Length; index++)
                 {
                     var param = funcType.Parameters[index];
-                    param.Type.HostWriter.WriteParameterInitializer(sb, param.CSharpVariableName, resolver, ignoreDispose: false, externallyOwned: false);
+                    param.Type.HostWriter.WriteParameterInitializer(sb, param.CSharpVariableName, resolver, ignoreDispose: true, externallyOwned: false);
                 }
 
                 if (sb.Length > length) sb.AppendLine();
@@ -1249,7 +1250,7 @@ public static class HostWriter
                 for (var i = 0; i < funcType.Parameters.Length;)
                 {
                     var param = funcType.Parameters[i];
-                    param.Type.HostWriter.WriteParameterSetter(sb, "parameters", param.CSharpVariableName, i, ignoreDispose: false, resolver: resolver, externallyOwned: false);
+                    param.Type.HostWriter.WriteParameterSetter(sb, "parameters", param.CSharpVariableName, i, ignoreDispose: true, resolver: resolver, externallyOwned: false);
                     i += param.Type.HostWriter.GetParameterSize(resolver);
                 }
 
@@ -1261,10 +1262,15 @@ public static class HostWriter
                 sb.AppendLine("global::Wasmtime.ComponentValue* parameters = null;");
             }
 
-            // Wrap call + result handling in try/finally to dispose parameter native wrappers
-            sb.AppendLine("try");
-            sb.AppendLine("{");
-            sb.IncrementIndent();
+            // Wrap in try/finally to dispose parameter native memory exactly once.
+            // ignoreDispose: true above prevents 'using' declarations, so the finally
+            // block is the sole owner responsible for freeing parameter data.
+            if (parameterSize > 0)
+            {
+                sb.AppendLine("try");
+                sb.AppendLine("{");
+                sb.IncrementIndent();
+            }
 
             sb.Append("using global::Wasmtime.ComponentCallResults result = _instance.Call(\"")
                 .Append(name)
@@ -1304,12 +1310,10 @@ public static class HostWriter
                 sb.AppendLine(");");
             }
 
-            sb.DecrementIndent();
-            sb.AppendLine("}");
-
-            // Dispose native wrappers for parameters (resources, options, records, etc.)
             if (parameterSize > 0)
             {
+                sb.DecrementIndent();
+                sb.AppendLine("}");
                 sb.AppendLine("finally");
                 sb.AppendLine("{");
                 sb.IncrementIndent();
