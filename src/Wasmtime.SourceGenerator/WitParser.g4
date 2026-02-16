@@ -182,8 +182,8 @@ constructor
     ;
 
 resourceMethod
-    : gate? constructor OpenParen funcParamList CloseParen  # ResourceConstructor
-    | gate? identifier Colon static? type                   # ResourceFunction
+    : gate? constructor OpenParen funcParamList CloseParen funcResult?  # ResourceConstructor
+    | gate? identifier Colon static? type                              # ResourceFunction
     ;
 
 funcParamList

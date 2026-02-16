@@ -240,7 +240,7 @@ public static class HostWriter
                 foreach (var group in instanceGroups)
                 {
                     sb.AppendLine();
-                    var instanceVarName = "instance_" + group.Key.Replace(":", "_").Replace("/", "_");
+                    var instanceVarName = "instance_" + group.Key.Replace(":", "_").Replace("/", "_").Replace("@", "_").Replace(".", "_");
                     sb.Append("using var ").Append(instanceVarName).Append(" = linker.DefineInstance(\"").Append(group.Key).AppendLine("\");");
 
                     // DefineResource for each resource in this instance
@@ -394,8 +394,9 @@ public static class HostWriter
 
     private static string BuildInterfacePath(WitCustomType customType)
     {
-        // Build the interface path like "tecs:ecs/ecs" from the custom type
-        return customType.Package.PackageName.FullName + "/" + customType.Name;
+        // Build the interface path like "example:calculator/logger@1.0.0" from the custom type
+        var versionStr = customType.Package.Version.IsDefault ? "" : $"@{customType.Package.Version}";
+        return customType.Package.PackageName.FullName + "/" + customType.Name + versionStr;
     }
 
     private static void WriteResourceImports(
