@@ -1,10 +1,21 @@
-﻿using Wasmtime.SourceGenerator.Models;
+using Wasmtime.SourceGenerator.Models;
 
 namespace Wasmtime.SourceGenerator.Generators.Host;
 
 public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.List)
 {
     public override bool MustBeDisposed => true;
+
+    /// <summary>
+    /// Returns true if the element type is a blittable primitive (excludes bool, char, enum, string, records, resources).
+    /// Blittable primitives can use stackalloc/ArrayPool to avoid heap allocations.
+    /// </summary>
+    private bool IsBlittablePrimitive => ElementType.Kind is
+        WitTypeKind.U8 or WitTypeKind.S8 or
+        WitTypeKind.U16 or WitTypeKind.S16 or
+        WitTypeKind.U32 or WitTypeKind.S32 or
+        WitTypeKind.U64 or WitTypeKind.S64 or
+        WitTypeKind.F32 or WitTypeKind.F64;
 
     /// <inheritdoc />
     public override void WriteParameter(IndentedStringBuilder sb, string name, ITypeContainerResolver resolver)
@@ -20,6 +31,16 @@ public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.Li
     {
         ElementType.HostWriter.WriteCSharpType(sb, resolver);
         sb.Append("[]");
+    }
+
+    /// <inheritdoc />
+    public override void WriteReturnType(IndentedStringBuilder sb, ITypeContainerResolver resolver)
+    {
+        // Use ReadOnlySpan<T> for return types — allows the host to return a span
+        // over existing storage (e.g. SoA arrays in an ECS) without allocation.
+        sb.Append("global::System.ReadOnlySpan<");
+        ElementType.HostWriter.WriteCSharpType(sb, resolver);
+        sb.Append(">");
     }
 
     /// <inheritdoc />
@@ -83,11 +104,22 @@ public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.Li
         var builderName = $"{parameterName}_b";
         var indexName = $"{parameterName}_i";
 
-        sb.AppendLine("// Convert list builder to array");
+        sb.AppendLine(IsBlittablePrimitive
+            ? "// Convert list builder to span (pooled — avoids heap allocation)"
+            : "// Convert list builder to array");
         sb.Append("global::Wasmtime.ListBuilder ").Append(builderName).Append(" = ")
             .Append(paramName).Append("[").Append(index).AppendLine("].ToListBuilder();");
 
-        WriteToArray(sb, resolver, parameterName, builderName, indexName);
+        WriteToArray(sb, resolver, parameterName, builderName, indexName, usePooledSpan: IsBlittablePrimitive);
+    }
+
+    /// <inheritdoc />
+    public override void WriteResultCleanup(IndentedStringBuilder sb, string paramName, int index, ITypeContainerResolver resolver)
+    {
+        if (!IsBlittablePrimitive) return;
+
+        var parameterName = $"{paramName}_{index}";
+        WritePooledReturn(sb, resolver, parameterName);
     }
 
     /// <inheritdoc />
@@ -114,14 +146,42 @@ public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.Li
         ITypeContainerResolver resolver,
         string parameterName,
         string builderName,
-        string indexName)
+        string indexName,
+        bool usePooledSpan = false)
     {
-        ElementType.HostWriter.WriteCSharpType(sb, resolver);
-        sb.Append("[] ").Append(parameterName).Append(" = new ");
-        ElementType.HostWriter.WriteCSharpType(sb, resolver);
-        sb.Append("[").Append(builderName).AppendLine(".Length];");
+        var countName = $"{parameterName}_len";
+        var rentedName = $"{parameterName}_rented";
 
-        sb.Append("for (int ").Append(indexName).Append(" = 0; ").Append(indexName).Append(" < ").Append(parameterName).Append(".Length; ").Append(indexName).AppendLine("++)");
+        sb.Append("var ").Append(countName).Append(" = ").Append(builderName).AppendLine(".Length;");
+
+        if (usePooledSpan)
+        {
+            // Use stackalloc for small lists, ArrayPool for large — avoid heap allocation
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append("[]? ").Append(rentedName).AppendLine(" = null;");
+            sb.Append("global::System.Span<");
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append("> ").Append(parameterName).Append(" = ").Append(countName).AppendLine(" <= 128");
+            sb.IncrementIndent();
+            sb.Append("? stackalloc ");
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append("[").Append(countName).AppendLine("]");
+            sb.Append(": new global::System.Span<");
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append(">(").Append(rentedName).Append(" = global::System.Buffers.ArrayPool<");
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append(">.Shared.Rent(").Append(countName).Append("), 0, ").Append(countName).AppendLine(");");
+            sb.DecrementIndent();
+        }
+        else
+        {
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append("[] ").Append(parameterName).Append(" = new ");
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append("[").Append(countName).AppendLine("];");
+        }
+
+        sb.Append("for (int ").Append(indexName).Append(" = 0; ").Append(indexName).Append(" < ").Append(countName).Append("; ").Append(indexName).AppendLine("++)");
         sb.AppendLine("{");
         sb.IncrementIndent();
         ElementType.HostWriter.WriteValueGetterInitializer(sb, $"{builderName}[{indexName}]", $"{parameterName}_{indexName}", resolver);
@@ -130,5 +190,17 @@ public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.Li
         sb.AppendLine(";");
         sb.DecrementIndent();
         sb.AppendLine("}");
+    }
+
+    /// <summary>
+    /// Emits code to return pooled array to ArrayPool if it was rented.
+    /// Call after the span has been consumed.
+    /// </summary>
+    private void WritePooledReturn(IndentedStringBuilder sb, ITypeContainerResolver resolver, string parameterName)
+    {
+        var rentedName = $"{parameterName}_rented";
+        sb.Append("if (").Append(rentedName).Append(" != null) global::System.Buffers.ArrayPool<");
+        ElementType.HostWriter.WriteCSharpType(sb, resolver);
+        sb.Append(">.Shared.Return(").Append(rentedName).AppendLine(");");
     }
 }

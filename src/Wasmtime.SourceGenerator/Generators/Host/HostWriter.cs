@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using SGF;
 using Wasmtime.SourceGenerator.Models;
@@ -1452,6 +1452,12 @@ public static class HostWriter
                 sb.AppendLine("();");
             }
 
+            // Return any pooled/rented arrays after the user method has consumed the spans
+            for (var i = 0; i < funcType.Parameters.Length; i++)
+            {
+                funcType.Parameters[i].Type.HostWriter.WriteResultCleanup(sb, "args", i, resolver);
+            }
+
             if (funcType.Results.Length > 0)
             {
                 sb.AppendLine();
@@ -1540,6 +1546,12 @@ public static class HostWriter
             sb.AppendLine("();");
         }
 
+        // Return any pooled/rented arrays after the factory method has consumed the spans
+        for (var i = 0; i < funcType.Parameters.Length; i++)
+        {
+            funcType.Parameters[i].Type.HostWriter.WriteResultCleanup(sb, "args", i, resolver);
+        }
+
         // Store in handle table and return handle
         if (rhw != null)
         {
@@ -1626,6 +1638,12 @@ public static class HostWriter
         else
         {
             sb.AppendLine("();");
+        }
+
+        // Return any pooled/rented arrays after the user method has consumed the spans
+        for (var i = 1; i < funcType.Parameters.Length; i++)
+        {
+            funcType.Parameters[i].Type.HostWriter.WriteResultCleanup(sb, "args", i, resolver);
         }
 
         // Handle return values
@@ -1727,7 +1745,7 @@ public static class HostWriter
         }
         else if (items.Length == 1)
         {
-            items[0].HostWriter.WriteCSharpType(sb, resolver);
+            items[0].HostWriter.WriteReturnType(sb, resolver);
         }
         else
         {
@@ -1735,7 +1753,7 @@ public static class HostWriter
             for (var i = 0; i < items.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
-                items[i].HostWriter.WriteCSharpType(sb, resolver);
+                items[i].HostWriter.WriteReturnType(sb, resolver);
             }
 
             sb.Append(')');
