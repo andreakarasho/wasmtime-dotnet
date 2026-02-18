@@ -1050,37 +1050,26 @@ public static class HostWriter
         sb.DecrementIndent();
         sb.AppendLine("}");
 
-        // Create
+        // Create — uses index-based access (O(N)) instead of name-matching (O(N^2))
+        // since the native record builder preserves field order matching the WIT definition.
         sb.AppendLine();
         sb.Append("public static ").Append(record.CSharpName).AppendLine(" FromRecordBuilder(global::Wasmtime.RecordBuilder builder)");
         sb.AppendLine("{");
         sb.IncrementIndent();
         sb.Append(record.CSharpName).Append(" result = new ").Append(record.CSharpName).AppendLine("();");
-        sb.AppendLine();
-        sb.AppendLine("foreach (var (name, value) in builder)");
-        sb.AppendLine("{");
-        sb.IncrementIndent();
 
         for (var index = 0; index < record.Fields.Length; index++)
         {
-            if (index > 0) sb.AppendLine();
+            sb.AppendLine();
 
             var field = record.Fields[index];
+            var valueExpr = $"builder.Get({index})";
 
-            sb.Append("if (name.Equals(global::Wit.Constants.").Append(field.CSharpName).AppendLine("))");
-            sb.AppendLine("{");
-            sb.IncrementIndent();
-            field.Type.HostWriter.WriteValueGetterInitializer(sb, "value", field.CSharpVariableName, resolver);
+            field.Type.HostWriter.WriteValueGetterInitializer(sb, valueExpr, field.CSharpVariableName, resolver);
             sb.Append("result.").Append(field.CSharpName).Append(" = ");
-            field.Type.HostWriter.WriteValueGetter(sb, "value", field.CSharpVariableName, resolver);
+            field.Type.HostWriter.WriteValueGetter(sb, valueExpr, field.CSharpVariableName, resolver);
             sb.AppendLine(";");
-            sb.AppendLine("continue;");
-            sb.DecrementIndent();
-            sb.AppendLine("}");
         }
-
-        sb.DecrementIndent();
-        sb.AppendLine("}");
 
         sb.AppendLine();
         sb.AppendLine("return result;");

@@ -1,4 +1,4 @@
-﻿using Wasmtime.SourceGenerator.Models;
+using Wasmtime.SourceGenerator.Models;
 
 namespace Wasmtime.SourceGenerator.Generators.Host;
 
@@ -20,9 +20,9 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
     {
         if (HasPayloads)
         {
-            // For variants with payloads, create a temp variable
+            // For variants with payloads, create a temp variable using ToVariantRaw to avoid string allocation
             var safeName = $"{paramName}_{index}".ToSafeVariable();
-            sb.Append("var varRaw_").Append(safeName).Append(" = ").Append(paramName).Append("[").Append(index).AppendLine("].ToVariant();");
+            sb.Append("var varRaw_").Append(safeName).Append(" = ").Append(paramName).Append("[").Append(index).AppendLine("].ToVariantRaw();");
 
             // Build the variant struct from discriminant + payload
             WriteCSharpType(sb, resolver);
@@ -52,11 +52,11 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
     {
         if (!HasPayloads)
         {
-            // Simple enum variant — use the enum helper FromByteVector
+            // Simple enum variant — use the enum helper FromByteVector with raw discriminant (no string allocation)
             sb.Append("global::");
             package.PackageName.WritePath(sb);
-            sb.Append('.').Append(name).Append("Helper.FromByteVector(new global::Wasmtime.ByteVector(");
-            sb.Append(paramName).Append(".ToVariant().Discriminant))");
+            sb.Append('.').Append(name).Append("Helper.FromByteVector(");
+            sb.Append(paramName).Append(".ToVariantRaw().Discriminant)");
         }
         else
         {
@@ -71,7 +71,7 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
     {
         if (HasPayloads)
         {
-            sb.Append("var varRaw_").Append(uniqueName).Append(" = ").Append(paramName).AppendLine(".ToVariant();");
+            sb.Append("var varRaw_").Append(uniqueName).Append(" = ").Append(paramName).AppendLine(".ToVariantRaw();");
             WriteCSharpType(sb, resolver);
             sb.Append(" ").Append(uniqueName).AppendLine(";");
             WriteVariantStructConstruction(sb, $"varRaw_{uniqueName}", uniqueName, resolver);
@@ -88,7 +88,7 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
             sb.Append("global::");
             package.PackageName.WritePath(sb);
             sb.Append('.').Append(name).Append("Helper.ToByteVector(");
-            sb.Append(paramKey).Append(").GetString(), null)");
+            sb.Append(paramKey).Append("), null, copyDiscriminant: false)");
         }
         else
         {
@@ -103,17 +103,18 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
         string resultVarName,
         ITypeContainerResolver resolver)
     {
-        // rawVarName is a (string Discriminant, ComponentValue? Payload) tuple
+        // rawVarName is a (ByteVector Discriminant, ComponentValue? Payload) tuple
         // resultVarName is the target variant struct variable
+        // Compare ByteVector discriminant against pre-allocated constants to avoid string allocation.
 
-        sb.Append("switch (").Append(rawVarName).AppendLine(".Discriminant)");
-        sb.AppendLine("{");
-        sb.IncrementIndent();
+        var discVar = $"{rawVarName}.Discriminant";
 
         foreach (var caseItem in cases)
         {
             var caseName = StringUtils.GetName(caseItem.Name);
-            sb.Append("case \"").Append(caseItem.Name).AppendLine("\":");
+
+            sb.Append("if (").Append(discVar).Append(".Equals(global::Wit.Constants.").Append(caseName).AppendLine("))");
+            sb.AppendLine("{");
             sb.IncrementIndent();
 
             if (caseItem.Type != null)
@@ -121,7 +122,6 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
                 sb.Append(resultVarName).Append(" = ");
                 WriteCSharpType(sb, resolver);
                 sb.Append(".Create").Append(caseName).Append("(");
-                // Extract payload value using the payload's ComponentValue
                 var payloadExpr = $"{rawVarName}.Payload!.Value";
                 caseItem.Type.HostWriter.WriteValueGetter(sb, payloadExpr, payloadExpr, resolver);
                 sb.AppendLine(");");
@@ -133,15 +133,16 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
                 sb.Append(".Create").Append(caseName).AppendLine("();");
             }
 
-            sb.AppendLine("break;");
             sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.Append("else ");
         }
 
-        sb.AppendLine("default:");
+        // Final else: unknown discriminant
+        sb.AppendLine();
+        sb.AppendLine("{");
         sb.IncrementIndent();
-        sb.Append("throw new global::System.InvalidOperationException($\"Unknown variant discriminant: {").Append(rawVarName).AppendLine(".Discriminant}\");");
-        sb.DecrementIndent();
-
+        sb.Append("throw new global::System.InvalidOperationException($\"Unknown variant discriminant: {").Append(discVar).AppendLine(".GetString()}\");");
         sb.DecrementIndent();
         sb.AppendLine("}");
     }

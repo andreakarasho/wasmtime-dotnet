@@ -1,7 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Threading;
 using Wasmtime.Interop;
 
 namespace Wasmtime;
@@ -16,7 +15,13 @@ public unsafe class ComponentInstance
     private readonly wasmtime_component_instance _handle;
     private readonly Store _store;
 
-    internal readonly SemaphoreSlim Lock = new(1, 1);
+    /// <summary>
+    /// Reentrancy guard. The component model requires that post_return is called
+    /// before the next function call on the same instance. Since stores are
+    /// single-threaded and ComponentCallResults is a ref struct (preventing
+    /// cross-thread/async usage), a simple boolean flag is sufficient.
+    /// </summary>
+    internal bool InCall;
 
     internal ComponentInstance(Component component, wasmtime_component_instance handle, Store store)
     {
@@ -26,7 +31,7 @@ public unsafe class ComponentInstance
     }
 
     /// <summary>
-    /// Calls a function in the component instance with synchronization.
+    /// Calls a function in the component instance.
     /// </summary>
     /// <param name="name">Name of the function to call.</param>
     /// <param name="resultCount">Number of results to expect from the call.</param>
@@ -41,7 +46,7 @@ public unsafe class ComponentInstance
     }
 
     /// <summary>
-    /// Calls a function in the component instance with synchronization.
+    /// Calls a function in the component instance.
     /// </summary>
     /// <param name="name">Name of the function to call.</param>
     /// <param name="resultCount">Number of results to expect from the call.</param>
@@ -54,7 +59,7 @@ public unsafe class ComponentInstance
     }
 
     /// <summary>
-    /// Calls a function in the component instance with synchronization.
+    /// Calls a function in the component instance.
     /// </summary>
     /// <param name="function">Instance of <see cref="GetFunction"/> to call.</param>
     /// <param name="resultCount">Number of results to expect from the call.</param>
@@ -69,7 +74,7 @@ public unsafe class ComponentInstance
     }
 
     /// <summary>
-    /// Calls a function in the component instance with synchronization.
+    /// Calls a function in the component instance.
     /// </summary>
     /// <param name="function">Instance of <see cref="GetFunction"/> to call.</param>
     /// <param name="resultCount">Number of results to expect from the call.</param>
@@ -78,11 +83,12 @@ public unsafe class ComponentInstance
     /// <returns>The results of the function call.</returns>
     public ComponentCallResults Call(ComponentInstanceFunction function, int resultCount, ComponentValue* values, int valuesLength)
     {
-        // Note: semaphore is released in ComponentCallResultsInternal.Dispose
-        if (!Lock.Wait(TimeSpan.FromSeconds(5)))
+        if (InCall)
         {
-            throw new TimeoutException("Could not acquire lock to call component function");
+            ThrowReentrancy();
         }
+
+        InCall = true;
 
         try
         {
@@ -93,7 +99,7 @@ public unsafe class ComponentInstance
 #endif
 
             var results = ComponentCallResultsInternal.ThreadInstance;
-            results.Initialize(resultCount, function.Function, _store.Context, Lock);
+            results.Initialize(resultCount, function.Function, _store.Context, this);
 
             ComponentBorrowTracker.BeginCall();
 
@@ -119,7 +125,7 @@ public unsafe class ComponentInstance
             // Don't call Dispose (which invokes post_return) since the call itself failed.
             ComponentCallResultsInternal.ThreadInstance.Reset();
             ComponentBorrowTracker.AbortCall();
-            Lock.Release();
+            InCall = false;
             throw;
         }
     }
@@ -143,45 +149,40 @@ public unsafe class ComponentInstance
     [MethodImpl(MethodImplOptions.NoInlining)]
     private ComponentInstanceFunction LoadFunction(string name)
     {
-        if (!Lock.Wait(TimeSpan.FromSeconds(5)))
-        {
-            throw new TimeoutException("Could not acquire lock to load component function");
-        }
-
-        try
-        {
 #if NET
-            ObjectDisposedException.ThrowIf(_store.Disposed, nameof(Store));
+        ObjectDisposedException.ThrowIf(_store.Disposed, nameof(Store));
 #else
-            if (_store.Disposed) throw new ObjectDisposedException(nameof(Store));
+        if (_store.Disposed) throw new ObjectDisposedException(nameof(Store));
 #endif
 
-            if (!_component.TryGetExport(name, out var index))
-            {
-                throw new WasmtimeException($"Function '{name}' not found in component");
-            }
-
-            byte success;
-            wasmtime_component_func func;
-
-            fixed (wasmtime_component_instance* instance = &_handle)
-            {
-                success = wasmtime_component_instance_get_func(instance, _store.Context, index, &func);
-            }
-
-            if (success != 1)
-            {
-                throw new WasmtimeException($"Export '{name}' is not a function");
-            }
-
-            var function = new ComponentInstanceFunction(func);
-            _cachedFunctions[name] = function;
-            return function;
-        }
-        finally
+        if (!_component.TryGetExport(name, out var index))
         {
-            Lock.Release();
+            throw new WasmtimeException($"Function '{name}' not found in component");
         }
+
+        byte success;
+        wasmtime_component_func func;
+
+        fixed (wasmtime_component_instance* instance = &_handle)
+        {
+            success = wasmtime_component_instance_get_func(instance, _store.Context, index, &func);
+        }
+
+        if (success != 1)
+        {
+            throw new WasmtimeException($"Export '{name}' is not a function");
+        }
+
+        var function = new ComponentInstanceFunction(func);
+        _cachedFunctions[name] = function;
+        return function;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowReentrancy()
+    {
+        throw new InvalidOperationException(
+            "Cannot call a component function while another call is in progress. " +
+            "Dispose the previous ComponentCallResults first.");
+    }
 }

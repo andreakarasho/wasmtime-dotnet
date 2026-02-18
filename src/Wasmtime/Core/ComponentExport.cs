@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
+using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -24,7 +23,11 @@ internal unsafe class ComponentExport
 
     public static readonly delegate* unmanaged[Cdecl] <void*, wasmtime_context*, void*, wasmtime_component_val*, nuint, wasmtime_component_val*, nuint, wasmtime_error*> CallerPtr = &Caller;
 
-    private static readonly ConcurrentDictionary<nint, ComponentFunction> RegisteredFunctions = new();
+    /// <summary>
+    /// Pre-allocated array for O(1) function lookup. Registration is write-once (during linker setup),
+    /// reads happen on every host import call. Volatile.Read/Write ensures visibility across threads.
+    /// </summary>
+    private static readonly ComponentFunction[] RegisteredFunctions = new ComponentFunction[MaxFunctions];
     private static int FunctionId;
     private static nint StaticFunctionIds;
 
@@ -48,15 +51,24 @@ internal unsafe class ComponentExport
 
         string? errorMessage = null;
 
-        if (RegisteredFunctions.TryGetValue((nint)data, out var function))
+        var id = (int)((nint)data - StaticFunctionIds);
+        if (id > 0 && id < MaxFunctions)
         {
-            try
+            ref var function = ref RegisteredFunctions[id];
+            if (function.Function != null)
             {
-                function.Function(function.State, args, (ComponentValue*)resultsPtr, new StoreContext(context));
+                try
+                {
+                    function.Function(function.State, args, (ComponentValue*)resultsPtr, new StoreContext(context));
+                }
+                catch (Exception ex)
+                {
+                    errorMessage = ex.Message;
+                }
             }
-            catch (Exception ex)
+            else
             {
-                errorMessage = ex.Message;
+                errorMessage = "Function not found";
             }
         }
         else
@@ -92,13 +104,8 @@ internal unsafe class ComponentExport
             throw new InvalidOperationException("Maximum number of functions reached.");
         }
 
-        var data = StaticFunctionIds + id;
+        RegisteredFunctions[id] = new ComponentFunction(state, function);
 
-        if (!RegisteredFunctions.TryAdd(data, new ComponentFunction(state, function)))
-        {
-            throw new InvalidOperationException("Could not register function.");
-        }
-
-        return data;
+        return StaticFunctionIds + id;
     }
 }

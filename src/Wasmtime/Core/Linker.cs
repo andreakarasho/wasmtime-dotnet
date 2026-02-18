@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -124,6 +124,17 @@ public sealed unsafe class LinkerInstance : IDisposable
     }
 
     public void Dispose()
+    {
+        if (Handle != null)
+        {
+            wasmtime_component_linker_instance_delete(Handle);
+            Handle = null;
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    ~LinkerInstance()
     {
         if (Handle != null)
         {

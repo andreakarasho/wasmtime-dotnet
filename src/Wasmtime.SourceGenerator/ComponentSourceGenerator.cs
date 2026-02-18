@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -138,6 +138,14 @@ public class ComponentSourceGenerator() : IncrementalGenerator("ComponentSourceG
                     foreach (var value in @enum.Values)
                     {
                         constants.Add(value.Name);
+                    }
+                }
+
+                if (item is WitVariant variant)
+                {
+                    foreach (var variantCase in variant.Cases)
+                    {
+                        constants.Add(variantCase.Name);
                     }
                 }
 

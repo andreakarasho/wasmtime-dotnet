@@ -1,9 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Threading;
 using Wasmtime.Interop;
 
 namespace Wasmtime;
@@ -11,7 +8,6 @@ namespace Wasmtime;
 public sealed unsafe class Store : IDisposable
 {
     private readonly ConcurrentDictionary<nint, ComponentInstance> _instances = new();
-    private readonly SemaphoreSlim _instanceSemaphore = new(1, 1);
 
     internal wasmtime_store* Handle;
     internal wasmtime_context* Context;
@@ -76,57 +72,34 @@ public sealed unsafe class Store : IDisposable
             throw new WasmtimeException("WASI P2 must be added to both the linker and the store");
         }
 
-        _instanceSemaphore.Wait();
+        wasmtime_component_instance handle;
+        var error = wasmtime_component_linker_instantiate(linker.ComponentHandle, Context, component.Handle, &handle);
 
-        try
-        {
-            wasmtime_component_instance handle;
-            var error = wasmtime_component_linker_instantiate(linker.ComponentHandle, Context, component.Handle, &handle);
+        WasmtimeException.ThrowIfError(error);
 
-            WasmtimeException.ThrowIfError(error);
-
-            var instance = new ComponentInstance(component, handle, this);
-            _instances.TryAdd((nint)component.Handle, instance);
-            return instance;
-        }
-        finally
-        {
-            _instanceSemaphore.Release();
-        }
+        var instance = new ComponentInstance(component, handle, this);
+        _instances.TryAdd((nint)component.Handle, instance);
+        return instance;
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        var acquiredLocks = new List<ComponentInstance>(_instances.Count);
-
-        try
+        // Verify no component calls are in progress. Since stores are single-threaded,
+        // an in-progress call here means the caller has a bug (disposing mid-call).
+        foreach (var instance in _instances.Values)
         {
-            // Before disposing the store, acquire all instance locks to ensure no
-            // calls are being made into the store while it's being disposed.
-            foreach (var instance in _instances.Values)
+            if (instance.InCall)
             {
-                if (instance.Lock.Wait(TimeSpan.FromSeconds(5)))
-                {
-                    acquiredLocks.Add(instance);
-                }
-                else
-                {
-                    throw new TimeoutException("Could not acquire lock to dispose store");
-                }
-            }
-
-            ReleaseUnmanagedResources();
-            Disposed = true;
-            GC.SuppressFinalize(this);
-        }
-        finally
-        {
-            foreach (var instance in acquiredLocks)
-            {
-                instance.Lock.Release();
+                throw new InvalidOperationException(
+                    "Cannot dispose store while a component call is in progress. " +
+                    "Dispose the ComponentCallResults first.");
             }
         }
+
+        ReleaseUnmanagedResources();
+        Disposed = true;
+        GC.SuppressFinalize(this);
     }
 
     ~Store()
