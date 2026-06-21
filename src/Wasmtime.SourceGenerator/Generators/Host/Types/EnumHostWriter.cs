@@ -1,4 +1,4 @@
-﻿using Wasmtime.SourceGenerator.Models;
+using Wasmtime.SourceGenerator.Models;
 
 namespace Wasmtime.SourceGenerator.Generators.Host;
 
@@ -81,8 +81,6 @@ public abstract class EnumHostWriterBase(
         WriteCSharpType(sb, resolver);
         sb.Append("Helper.ToByteVector");
         AddWriteCreateComponentValueArguments(sb, resolver);
-        sb.Append(", copyConstants: ");
-        sb.Append(externallyOwned ? "true" : "false");
         sb.Append(')');
     }
 

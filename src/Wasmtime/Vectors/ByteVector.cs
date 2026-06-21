@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
 using Wasmtime.Interop;
@@ -40,7 +41,7 @@ public readonly unsafe struct ByteVector : IDisposable, IEquatable<ByteVector>
     {
         fixed (wasm_byte_vec_t* vec = &_vector)
         {
-            wasm_byte_vec_copy(vec, &vector._vector);
+            wasm_byte_vec_new(vec, vector._vector.size, vector._vector.data);
         }
     }
 
@@ -63,17 +64,25 @@ public readonly unsafe struct ByteVector : IDisposable, IEquatable<ByteVector>
 
     public ByteVector(string data)
     {
+        byte[]? rented = null;
         var bytes = Encoding.UTF8.GetMaxByteCount(data.Length) <= 256
             ? stackalloc byte[256]
-            : new byte[Encoding.UTF8.GetByteCount(data)];
+            : (rented = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetByteCount(data)));
 
-        fixed (char* utf16 = data)
-        fixed (byte* p = bytes)
-        fixed (wasm_byte_vec_t* vec = &_vector)
+        try
         {
-            var len = Encoding.UTF8.GetBytes(utf16, data.Length, p, bytes.Length);
+            fixed (char* utf16 = data)
+            fixed (byte* p = bytes)
+            fixed (wasm_byte_vec_t* vec = &_vector)
+            {
+                var len = Encoding.UTF8.GetBytes(utf16, data.Length, p, bytes.Length);
 
-            wasm_byte_vec_new(vec, (UIntPtr)len, p);
+                wasm_byte_vec_new(vec, (UIntPtr)len, p);
+            }
+        }
+        finally
+        {
+            if (rented != null) ArrayPool<byte>.Shared.Return(rented);
         }
     }
 

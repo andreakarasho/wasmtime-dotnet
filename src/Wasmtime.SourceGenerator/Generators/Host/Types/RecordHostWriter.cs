@@ -1,4 +1,4 @@
-﻿using Wasmtime.SourceGenerator.Models;
+using Wasmtime.SourceGenerator.Models;
 
 namespace Wasmtime.SourceGenerator.Generators.Host;
 

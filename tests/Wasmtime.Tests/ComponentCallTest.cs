@@ -32,11 +32,11 @@ public class ComponentCallTest(ComponentFixture fixture)
     [Fact]
     public async Task ConcurrentCalls_FunctionName()
     {
-        using var state = fixture.CreateState();
-
+        // One outstanding call per instance: each concurrent worker gets its own state.
         await ExecuteConcurrent(
-            () => state.Exports,
-            static s => Assert.Equal("UPPERCASE", s.Uppercase("uppercase")));
+            fixture.CreateState,
+            static s => Assert.Equal("UPPERCASE", s.Exports.Uppercase("uppercase")),
+            static s => s.Dispose());
     }
 
     [Fact]
@@ -57,27 +57,29 @@ public class ComponentCallTest(ComponentFixture fixture)
     [Fact]
     public async Task StressTest()
     {
-        using var stateA = fixture.CreateState();
-        using var stateB = fixture.CreateState();
-
         var entity = fixture.Imports.Entity;
         var expectedEntityDescription = $"Entity {entity.Id}: {entity.Name}";
 
+        // One outstanding call per instance: each concurrent worker gets its own state.
         var upperCase = ExecuteConcurrent(
-            () => stateA.Exports,
-            static s => Assert.Equal("UPPERCASE", s.Uppercase("uppercase")));
+            fixture.CreateState,
+            static s => Assert.Equal("UPPERCASE", s.Exports.Uppercase("uppercase")),
+            static s => s.Dispose());
 
         var lowerCase = ExecuteConcurrent(
-            () => stateA.Exports,
-            static s => Assert.Equal("foobar", s.HostCombineString("foo", "bar")));
+            fixture.CreateState,
+            static s => Assert.Equal("foobar", s.Exports.HostCombineString("foo", "bar")),
+            static s => s.Dispose());
 
         var entityDescription = ExecuteConcurrent(
-            () => stateB.Exports,
-            s => Assert.Equal(expectedEntityDescription, s.GetHostEntityDescription()));
+            fixture.CreateState,
+            s => Assert.Equal(expectedEntityDescription, s.Exports.GetHostEntityDescription()),
+            static s => s.Dispose());
 
         var sumNestedLists = ExecuteConcurrent(
-            () => stateB.Exports,
-            static s => Assert.Equal(6u, s.SumNestedList([[1, 2], [3]])));
+            fixture.CreateState,
+            static s => Assert.Equal(6u, s.Exports.SumNestedList([[1, 2], [3]])),
+            static s => s.Dispose());
 
         await Task.WhenAll(upperCase, lowerCase, entityDescription, sumNestedLists);
     }

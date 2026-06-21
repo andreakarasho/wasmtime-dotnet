@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using SGF;
 using Wasmtime.SourceGenerator.Models;
@@ -1322,37 +1322,26 @@ public static class HostWriter
         sb.DecrementIndent();
         sb.AppendLine("}");
 
-        // Create
+        // Create — uses index-based access (O(N)) instead of name-matching (O(N^2))
+        // since the native record builder preserves field order matching the WIT definition.
         sb.AppendLine();
         sb.Append("public static ").Append(record.CSharpName).AppendLine(" FromRecordBuilder(global::Wasmtime.RecordBuilder builder)");
         sb.AppendLine("{");
         sb.IncrementIndent();
         sb.Append(record.CSharpName).Append(" result = new ").Append(record.CSharpName).AppendLine("();");
-        sb.AppendLine();
-        sb.AppendLine("foreach (var (name, value) in builder)");
-        sb.AppendLine("{");
-        sb.IncrementIndent();
 
         for (var index = 0; index < record.Fields.Length; index++)
         {
-            if (index > 0) sb.AppendLine();
+            sb.AppendLine();
 
             var field = record.Fields[index];
+            var valueExpr = $"builder.Get({index})";
 
-            sb.Append("if (name.Equals(global::Wit.Constants.").Append(field.CSharpName).AppendLine("))");
-            sb.AppendLine("{");
-            sb.IncrementIndent();
-            field.Type.HostWriter.WriteValueGetterInitializer(sb, "value", field.CSharpVariableName, resolver);
+            field.Type.HostWriter.WriteValueGetterInitializer(sb, valueExpr, field.CSharpVariableName, resolver);
             sb.Append("result.").Append(field.CSharpName).Append(" = ");
-            field.Type.HostWriter.WriteValueGetter(sb, "value", field.CSharpVariableName, resolver);
+            field.Type.HostWriter.WriteValueGetter(sb, valueExpr, field.CSharpVariableName, resolver);
             sb.AppendLine(";");
-            sb.AppendLine("continue;");
-            sb.DecrementIndent();
-            sb.AppendLine("}");
         }
-
-        sb.DecrementIndent();
-        sb.AppendLine("}");
 
         sb.AppendLine();
         sb.AppendLine("return result;");
@@ -1504,13 +1493,10 @@ public static class HostWriter
             {
                 var length = sb.Length;
 
+                // ignoreDispose: true — wasmtime_component_func_call takes ownership of parameter data
                 for (var index = 0; index < funcType.Parameters.Length; index++)
                 {
                     var param = funcType.Parameters[index];
-                    // ignoreDispose: true — the try/finally below is the single owner that disposes
-                    // every parameter slot exactly once. Emitting a self-disposing `using` here too
-                    // would double-free the shared native pointer (string/list/record), corrupting
-                    // the heap. Non-disposable types are unaffected.
                     param.Type.HostWriter.WriteParameterInitializer(sb, param.CSharpVariableName, resolver, ignoreDispose: true, externallyOwned: false);
                 }
 
@@ -1538,10 +1524,10 @@ public static class HostWriter
                 sb.AppendLine("global::Wasmtime.ComponentValue* parameters = null;");
             }
 
-            // Wrap call + result handling in try/finally to dispose parameter native wrappers.
-            // Only needed when there are parameters to dispose; a bare try is invalid C#.
-            var wrapInTry = parameterSize > 0;
-            if (wrapInTry)
+            // Wrap call + result handling in try/finally to dispose parameter native memory
+            // exactly once. ignoreDispose: true above prevents 'using' declarations, so the
+            // finally is the sole owner; a bare try (no params) would be invalid C#.
+            if (parameterSize > 0)
             {
                 sb.AppendLine("try");
                 sb.AppendLine("{");
@@ -1599,15 +1585,11 @@ public static class HostWriter
                 sb.AppendLine(");");
             }
 
-            if (wrapInTry)
+            // Close the try and dispose parameter native memory in the finally.
+            if (parameterSize > 0)
             {
                 sb.DecrementIndent();
                 sb.AppendLine("}");
-            }
-
-            // Dispose native wrappers for parameters (resources, options, records, etc.)
-            if (parameterSize > 0)
-            {
                 sb.AppendLine("finally");
                 sb.AppendLine("{");
                 sb.IncrementIndent();
@@ -1748,6 +1730,12 @@ public static class HostWriter
                 sb.AppendLine("();");
             }
 
+            // Return any pooled/rented arrays after the user method has consumed the spans
+            for (var i = 0; i < funcType.Parameters.Length; i++)
+            {
+                funcType.Parameters[i].Type.HostWriter.WriteResultCleanup(sb, "args", i, resolver);
+            }
+
             if (funcType.Results.Length > 0)
             {
                 sb.AppendLine();
@@ -1836,6 +1824,12 @@ public static class HostWriter
             sb.AppendLine("();");
         }
 
+        // Return any pooled/rented arrays after the factory method has consumed the spans
+        for (var i = 0; i < funcType.Parameters.Length; i++)
+        {
+            funcType.Parameters[i].Type.HostWriter.WriteResultCleanup(sb, "args", i, resolver);
+        }
+
         // Store in handle table and return handle
         if (rhw != null)
         {
@@ -1922,6 +1916,12 @@ public static class HostWriter
         else
         {
             sb.AppendLine("();");
+        }
+
+        // Return any pooled/rented arrays after the user method has consumed the spans
+        for (var i = 1; i < funcType.Parameters.Length; i++)
+        {
+            funcType.Parameters[i].Type.HostWriter.WriteResultCleanup(sb, "args", i, resolver);
         }
 
         // Handle return values
@@ -2084,7 +2084,7 @@ public static class HostWriter
         }
         else if (items.Length == 1)
         {
-            items[0].HostWriter.WriteCSharpType(sb, resolver);
+            items[0].HostWriter.WriteReturnType(sb, resolver);
         }
         else
         {
@@ -2092,7 +2092,7 @@ public static class HostWriter
             for (var i = 0; i < items.Length; i++)
             {
                 if (i > 0) sb.Append(", ");
-                items[i].HostWriter.WriteCSharpType(sb, resolver);
+                items[i].HostWriter.WriteReturnType(sb, resolver);
             }
 
             sb.Append(')');

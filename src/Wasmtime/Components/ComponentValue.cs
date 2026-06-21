@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Wasmtime.Interop;
@@ -325,16 +326,14 @@ public struct ComponentValue : IDisposable
     /// <returns>A <see cref="ComponentValue"/> representing the enum.</returns>
     public static unsafe ComponentValue CreateEnum<T>(
         T value,
-        delegate* managed<T, ByteVector> toBytes,
-        bool copyConstants) where T : struct, Enum
+        delegate* managed<T, ByteVector> toBytes) where T : struct, Enum
     {
         var bytes = toBytes(value);
         var val = new wasmtime_component_val();
         val.kind = 17;
-        val.of.enumeration = copyConstants ? new ByteVector(bytes).Value : bytes.Value;
+        val.of.enumeration = bytes.Value;
 
-        IncrementActiveCount(copyConstants);
-        return new ComponentValue(val, copyConstants);
+        return new ComponentValue(val, externallyOwned: false);
     }
 
     /// <summary>
@@ -348,8 +347,7 @@ public struct ComponentValue : IDisposable
     public static unsafe ComponentValue CreateFlags<T>(
         T value,
         delegate* managed<T, ByteVector> toBytes,
-        delegate* managed<T, Span<T>, int> expand,
-        bool copyConstants
+        delegate* managed<T, Span<T>, int> expand
     ) where T : unmanaged, Enum
     {
         Span<T> values = stackalloc T[64];
@@ -364,109 +362,108 @@ public struct ComponentValue : IDisposable
             for (var i = 0; i < count; i++)
             {
                 var bytes = toBytes(values[i]);
-                builder[i] = copyConstants ? new ByteVector(bytes) : bytes;
+                builder[i] = bytes;
             }
 
             val.of.flags = builder.Value;
         }
 
-        IncrementActiveCount(copyConstants);
-        return new ComponentValue(val, copyConstants);
+        return new ComponentValue(val, externallyOwned: false);
     }
 
     public readonly bool ToBoolean()
     {
-        if (_val.kind != 0) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Boolean.");
+        if (_val.kind != 0) ThrowInvalidKind(_val.kind, "Boolean");
         return _val.of.boolean != 0;
     }
 
     public readonly sbyte ToSByte()
     {
-        if (_val.kind != 1) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to SByte.");
+        if (_val.kind != 1) ThrowInvalidKind(_val.kind, "SByte");
         return _val.of.s8;
     }
 
     public readonly byte ToByte()
     {
-        if (_val.kind != 2) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Byte.");
+        if (_val.kind != 2) ThrowInvalidKind(_val.kind, "Byte");
         return _val.of.u8;
     }
 
     public readonly short ToInt16()
     {
-        if (_val.kind != 3) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Int16.");
+        if (_val.kind != 3) ThrowInvalidKind(_val.kind, "Int16");
         return _val.of.s16;
     }
 
     public readonly ushort ToUInt16()
     {
-        if (_val.kind != 4) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to UInt16.");
+        if (_val.kind != 4) ThrowInvalidKind(_val.kind, "UInt16");
         return _val.of.u16;
     }
 
     public readonly int ToInt32()
     {
-        if (_val.kind != 5) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Int32.");
+        if (_val.kind != 5) ThrowInvalidKind(_val.kind, "Int32");
         return _val.of.s32;
     }
 
     public readonly uint ToUInt32()
     {
-        if (_val.kind != 6) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to UInt32.");
+        if (_val.kind != 6) ThrowInvalidKind(_val.kind, "UInt32");
         return _val.of.u32;
     }
 
     public readonly long ToInt64()
     {
-        if (_val.kind != 7) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Int64.");
+        if (_val.kind != 7) ThrowInvalidKind(_val.kind, "Int64");
         return _val.of.s64;
     }
 
     public readonly ulong ToUInt64()
     {
-        if (_val.kind != 8) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to UInt64.");
+        if (_val.kind != 8) ThrowInvalidKind(_val.kind, "UInt64");
         return _val.of.u64;
     }
 
     public readonly float ToFloat()
     {
-        if (_val.kind != 9) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Float.");
+        if (_val.kind != 9) ThrowInvalidKind(_val.kind, "Float");
         return _val.of.f32;
     }
 
     public readonly double ToDouble()
     {
-        if (_val.kind != 10) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Double.");
+        if (_val.kind != 10) ThrowInvalidKind(_val.kind, "Double");
         return _val.of.f64;
     }
 
     public readonly char ToChar()
     {
-        if (_val.kind != 11) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Char.");
+        if (_val.kind != 11) ThrowInvalidKind(_val.kind, "Char");
         return (char)_val.of.character;
     }
 
     public readonly string ToStringValue()
     {
-        if (_val.kind != 12) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to String.");
+        if (_val.kind != 12) ThrowInvalidKind(_val.kind, "String");
         return new ByteVector(_val.of.@string).GetString();
     }
 
     public readonly ListBuilder ToListBuilder()
     {
-        if (_val.kind != 13) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to List.");
+        if (_val.kind != 13) ThrowInvalidKind(_val.kind, "List");
         return new ListBuilder(_val.of.list);
     }
 
     public readonly RecordBuilder ToRecordBuilder()
     {
-        if (_val.kind != 14) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Record.");
+        if (_val.kind != 14) ThrowInvalidKind(_val.kind, "Record");
         return new RecordBuilder(_val.of.record);
     }
 
     public readonly unsafe T ToEnum<T>(delegate* managed<ByteVector, T> toBytes) where T : struct, Enum
     {
-        if (_val.kind != 17) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Enum.");
+        if (_val.kind != 17) ThrowInvalidKind(_val.kind, "Enum");
         return toBytes(new ByteVector(_val.of.enumeration));
     }
 
@@ -474,7 +471,7 @@ public struct ComponentValue : IDisposable
         delegate* managed<ByteVector, T> toEnum,
         delegate* managed<ReadOnlySpan<T>, T> combine) where T : unmanaged, Enum
     {
-        if (_val.kind != 20) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Enum.");
+        if (_val.kind != 20) ThrowInvalidKind(_val.kind, "Flags");
         var flags = new FlagsBuilder(_val.of.flags);
 
         switch (flags.Length)
@@ -499,7 +496,7 @@ public struct ComponentValue : IDisposable
 
     public unsafe ComponentCallResults ToTuple()
     {
-        if (_val.kind != 15) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Tuple.");
+        if (_val.kind != 15) ThrowInvalidKind(_val.kind, "Tuple");
         var tuple = _val.of.tuple;
 
         return new ComponentCallResults(tuple.data, (int)tuple.size);
@@ -557,7 +554,7 @@ public struct ComponentValue : IDisposable
     /// </summary>
     public readonly unsafe ComponentValue? ToOption()
     {
-        if (_val.kind != 18) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Option.");
+        if (_val.kind != 18) ThrowInvalidKind(_val.kind, "Option");
         if (_val.of.option == null) return null;
         return new ComponentValue(*_val.of.option, true);
     }
@@ -569,9 +566,19 @@ public struct ComponentValue : IDisposable
     /// <param name="payload">The payload value, or null if the case has no payload.</param>
     public static unsafe ComponentValue CreateVariant(string discriminant, ComponentValue? payload)
     {
+        return CreateVariant(new ByteVector(discriminant), payload, copyDiscriminant: false);
+    }
+
+    /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing a variant type from a pre-encoded discriminant.
+    /// When <paramref name="copyDiscriminant"/> is false, the ByteVector's data is used directly (for cached constants).
+    /// When true, a copy is made so the original ByteVector remains valid.
+    /// </summary>
+    public static unsafe ComponentValue CreateVariant(ByteVector discriminant, ComponentValue? payload, bool copyDiscriminant)
+    {
         var val = new wasmtime_component_val();
         val.kind = 16;
-        val.of.variant.discriminant = new ByteVector(discriminant).Value;
+        val.of.variant.discriminant = copyDiscriminant ? new ByteVector(discriminant).Value : discriminant.Value;
         if (payload.HasValue)
         {
             var src = payload.Value._val;
@@ -657,7 +664,7 @@ public struct ComponentValue : IDisposable
             return _val.of.u32;
         }
 
-        if (_val.kind != 21) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Resource.");
+        if (_val.kind != 21) ThrowInvalidKind(_val.kind, "Resource");
         wasmtime_component_resource_host_t* hostRes;
         var error = wasmtime_component_resource_any_to_host(context.Handle, _val.of.resource, &hostRes);
         WasmtimeException.ThrowIfError(error);
@@ -678,7 +685,7 @@ public struct ComponentValue : IDisposable
             return _val.of.u32;
         }
 
-        if (_val.kind != 21) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Resource.");
+        if (_val.kind != 21) ThrowInvalidKind(_val.kind, "Resource");
         wasmtime_component_resource_host_t* hostRes;
         var error = wasmtime_component_resource_any_to_host(context.Handle, _val.of.resource, &hostRes);
         WasmtimeException.ThrowIfError(error);
@@ -731,7 +738,7 @@ public struct ComponentValue : IDisposable
     /// </summary>
     public readonly unsafe (string Discriminant, ComponentValue? Payload) ToVariant()
     {
-        if (_val.kind != 16) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Variant.");
+        if (_val.kind != 16) ThrowInvalidKind(_val.kind, "Variant");
         var discriminant = new ByteVector(_val.of.variant.discriminant).GetString();
         ComponentValue? payload = _val.of.variant.val != null
             ? new ComponentValue(*_val.of.variant.val, true)
@@ -778,6 +785,24 @@ public struct ComponentValue : IDisposable
             : null;
         return (isOk, payload);
     }
+
+    /// <summary>
+    /// Extracts the discriminant and payload of a variant without allocating a string.
+    /// The discriminant is returned as a raw ByteVector for comparison against cached constants.
+    /// </summary>
+    public readonly unsafe (ByteVector Discriminant, ComponentValue? Payload) ToVariantRaw()
+    {
+        if (_val.kind != 16) ThrowInvalidKind(_val.kind, "Variant");
+        var discriminant = new ByteVector(_val.of.variant.discriminant);
+        ComponentValue? payload = _val.of.variant.val != null
+            ? new ComponentValue(*_val.of.variant.val, true)
+            : null;
+        return (discriminant, payload);
+    }
+
+    [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowInvalidKind(byte kind, string target)
+        => throw new InvalidOperationException($"Cannot convert ComponentValue of kind {kind} to {target}.");
 
     /// <inheritdoc />
     public unsafe void Dispose()
@@ -856,7 +881,7 @@ public struct ComponentValue : IDisposable
                 }
                 DecrementActiveCount();
                 break;
-            case 19:
+            case 19: // result
                 if (val.of.result.val != null)
                 {
                     wasmtime_component_val_free(val.of.result.val);
@@ -939,5 +964,57 @@ public struct ComponentValue : IDisposable
                 }
                 break;
         }
+    }
+
+    /// <summary>
+    /// Creates a ComponentValue containing a list of records where each record has
+    /// homogeneous blittable primitive fields, constructed from a flat data span.
+    /// Uses [SuppressGCTransition] P/Invoke variants for minimal per-call overhead.
+    /// </summary>
+    /// <typeparam name="T">The primitive type (float, double, int, etc.).</typeparam>
+    /// <param name="result">Pointer to the output ComponentValue slot.</param>
+    /// <param name="flatData">Flat span of primitive values (recordCount * fieldCount elements).</param>
+    /// <param name="recordCount">Number of records in the list.</param>
+    /// <param name="fieldCount">Number of fields per record.</param>
+    /// <param name="fieldNameTemplates">Template ByteVectors for field names (copied per record).</param>
+    /// <param name="primitiveKind">The wasmtime_component_valkind_t for the primitive type.</param>
+    public static unsafe void CreateListOfBlittableRecords<T>(
+        ComponentValue* result,
+        ReadOnlySpan<T> flatData,
+        int recordCount,
+        int fieldCount,
+        ReadOnlySpan<ByteVector> fieldNameTemplates,
+        byte primitiveKind)
+        where T : unmanaged
+    {
+        wasmtime_component_vallist list;
+        wasmtime_component_vallist_new_uninit_fast(&list, (UIntPtr)recordCount);
+
+        for (int i = 0; i < recordCount; i++)
+        {
+            wasmtime_component_valrecord rec;
+            wasmtime_component_valrecord_new_uninit_fast(&rec, (UIntPtr)fieldCount);
+
+            for (int f = 0; f < fieldCount; f++)
+            {
+                // Use pointer arithmetic to avoid managed ref / fixed statement overhead
+                var entryPtr = rec.data + f;
+                var template = fieldNameTemplates[f];
+
+                // Copy field name from template (wasmtime takes ownership and frees after processing)
+                wasm_byte_vec_new_fast(&entryPtr->name, template.Value.size, template.Value.data);
+
+                // Write primitive value directly to the union (all fields at offset 0)
+                entryPtr->val.kind = primitiveKind;
+                *(T*)&entryPtr->val.of = flatData[i * fieldCount + f];
+            }
+
+            var listEntry = list.data + i;
+            listEntry->kind = 14; // WASMTIME_COMPONENT_RECORD
+            listEntry->of.record = rec;
+        }
+
+        result->_val.kind = 13; // WASMTIME_COMPONENT_LIST
+        result->_val.of.list = list;
     }
 }

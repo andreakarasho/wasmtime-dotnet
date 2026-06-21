@@ -201,7 +201,8 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
 
         var result = state.Exports.ReturnStatusList([Status.Active, Status.Inactive, Status.Pending]);
 
-        Assert.Equal([Status.Active, Status.Inactive, Status.Pending], result);
+        // List returns are ReadOnlySpan<T> (span optimization); materialize for comparison.
+        Assert.Equal([Status.Active, Status.Inactive, Status.Pending], result.ToArray());
     }
 
     [Fact]
@@ -211,7 +212,7 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
 
         var result = state.Exports.ReturnPermissionList([Permission.Read | Permission.Write, Permission.Execute]);
 
-        Assert.Equal([Permission.Read | Permission.Write, Permission.Execute], result);
+        Assert.Equal([Permission.Read | Permission.Write, Permission.Execute], result.ToArray());
     }
 
     [Fact]

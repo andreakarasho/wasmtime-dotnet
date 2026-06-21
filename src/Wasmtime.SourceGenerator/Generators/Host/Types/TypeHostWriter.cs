@@ -1,4 +1,4 @@
-﻿using Wasmtime.SourceGenerator.Models;
+using Wasmtime.SourceGenerator.Models;
 
 namespace Wasmtime.SourceGenerator.Generators.Host;
 
@@ -130,6 +130,24 @@ public class TypeHostWriter(WitTypeKind kind)
         });
 
         sb.Append("()");
+    }
+
+    /// <summary>
+    /// Writes the C# type for use as a method return type. Override in subclasses where the return
+    /// type differs from the storage type (e.g. lists return <c>ReadOnlySpan&lt;T&gt;</c> instead of <c>T[]</c>).
+    /// Defaults to <see cref="WriteCSharpType"/>.
+    /// </summary>
+    public virtual void WriteReturnType(IndentedStringBuilder sb, ITypeContainerResolver resolver)
+    {
+        WriteCSharpType(sb, resolver);
+    }
+
+    /// <summary>
+    /// Emits cleanup code after a parameter produced by <see cref="WriteResultGetterInitializer"/>
+    /// has been consumed. Override in subclasses that allocate temporary buffers (e.g. ArrayPool).
+    /// </summary>
+    public virtual void WriteResultCleanup(IndentedStringBuilder sb, string paramName, int index, ITypeContainerResolver resolver)
+    {
     }
 
     /// <summary>
