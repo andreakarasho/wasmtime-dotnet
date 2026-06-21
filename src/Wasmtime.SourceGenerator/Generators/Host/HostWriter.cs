@@ -1234,7 +1234,11 @@ public static class HostWriter
                 for (var index = 0; index < funcType.Parameters.Length; index++)
                 {
                     var param = funcType.Parameters[index];
-                    param.Type.HostWriter.WriteParameterInitializer(sb, param.CSharpVariableName, resolver, ignoreDispose: false, externallyOwned: false);
+                    // ignoreDispose: true — the try/finally below is the single owner that disposes
+                    // every parameter slot exactly once. Emitting a self-disposing `using` here too
+                    // would double-free the shared native pointer (string/list/record), corrupting
+                    // the heap. Non-disposable types are unaffected.
+                    param.Type.HostWriter.WriteParameterInitializer(sb, param.CSharpVariableName, resolver, ignoreDispose: true, externallyOwned: false);
                 }
 
                 if (sb.Length > length) sb.AppendLine();
@@ -1249,7 +1253,7 @@ public static class HostWriter
                 for (var i = 0; i < funcType.Parameters.Length;)
                 {
                     var param = funcType.Parameters[i];
-                    param.Type.HostWriter.WriteParameterSetter(sb, "parameters", param.CSharpVariableName, i, ignoreDispose: false, resolver: resolver, externallyOwned: false);
+                    param.Type.HostWriter.WriteParameterSetter(sb, "parameters", param.CSharpVariableName, i, ignoreDispose: true, resolver: resolver, externallyOwned: false);
                     i += param.Type.HostWriter.GetParameterSize(resolver);
                 }
 
@@ -1261,10 +1265,15 @@ public static class HostWriter
                 sb.AppendLine("global::Wasmtime.ComponentValue* parameters = null;");
             }
 
-            // Wrap call + result handling in try/finally to dispose parameter native wrappers
-            sb.AppendLine("try");
-            sb.AppendLine("{");
-            sb.IncrementIndent();
+            // Wrap call + result handling in try/finally to dispose parameter native wrappers.
+            // Only needed when there are parameters to dispose; a bare try is invalid C#.
+            var wrapInTry = parameterSize > 0;
+            if (wrapInTry)
+            {
+                sb.AppendLine("try");
+                sb.AppendLine("{");
+                sb.IncrementIndent();
+            }
 
             sb.Append("using global::Wasmtime.ComponentCallResults result = _instance.Call(\"")
                 .Append(name)
@@ -1304,8 +1313,11 @@ public static class HostWriter
                 sb.AppendLine(");");
             }
 
-            sb.DecrementIndent();
-            sb.AppendLine("}");
+            if (wrapInTry)
+            {
+                sb.DecrementIndent();
+                sb.AppendLine("}");
+            }
 
             // Dispose native wrappers for parameters (resources, options, records, etc.)
             if (parameterSize > 0)
