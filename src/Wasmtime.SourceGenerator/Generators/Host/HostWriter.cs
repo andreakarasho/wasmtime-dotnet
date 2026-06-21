@@ -1406,11 +1406,8 @@ public static class HostWriter
                 WriteMethodInvoke(sb, className, funcType, name, resolver);
                 return;
             }
-            if (name.StartsWith("[resource-drop]"))
-            {
-                WriteDropInvoke(sb, className, funcType, name, resolver);
-                return;
-            }
+            // Note: [resource-drop] is not an import — drop is handled by the resource
+            // destructor registered via DefineResource (see WriteResourceImports).
 
             // Generic path for non-resource imports
             var importName = StringUtils.GetName(name);
@@ -1661,30 +1658,6 @@ public static class HostWriter
             }
         }
 
-        sb.DecrementIndent();
-        sb.AppendLine("}");
-        sb.AppendLine();
-    }
-
-    /// <summary>
-    /// Generates Invoke for [resource-drop]resource — looks up, removes, disposes.
-    /// </summary>
-    private static void WriteDropInvoke(IndentedStringBuilder sb,
-        string className,
-        WitFuncType funcType,
-        string name,
-        ITypeContainerResolver resolver)
-    {
-        var importName = StringUtils.GetName(name);
-        var resName = name.Substring("[resource-drop]".Length);
-        var dropMethodName = "Drop" + StringUtils.GetName(resName);
-
-        sb.Append("private unsafe static void Invoke").Append(importName);
-        sb.AppendLine("(object? state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
-        sb.AppendLine("{");
-        sb.IncrementIndent();
-        sb.Append("var @this = (").Append(className).Append("Imports").AppendLine(")state!;");
-        sb.Append("@this.").Append(dropMethodName).AppendLine("(args[0].ToResourceRepAndDrop(context));");
         sb.DecrementIndent();
         sb.AppendLine("}");
         sb.AppendLine();
