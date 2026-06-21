@@ -247,4 +247,26 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
 
         Assert.Equal(permission, state.Exports.ReturnPermission(permission));
     }
+
+    [Fact]
+    public void Result_Ok()
+    {
+        using var state = fixture.CreateState();
+
+        var result = state.Exports.SafeDivide(10, 2);
+
+        Assert.True(result.IsOk);
+        Assert.Equal(5, result.Value);
+    }
+
+    [Fact]
+    public void Result_Err()
+    {
+        using var state = fixture.CreateState();
+
+        var result = state.Exports.SafeDivide(10, 0);
+
+        Assert.False(result.IsOk);
+        Assert.Equal("division by zero", result.Error);
+    }
 }

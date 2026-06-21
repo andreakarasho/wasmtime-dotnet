@@ -87,6 +87,17 @@ void exports_test_add_point(test_point_t *p1, test_point_t *p2, test_point_t *re
     ret->y = p1->y + p2->y;
 }
 
+// result<s32, string>: returns ok(a/b), or err("division by zero") when b == 0.
+// wit-bindgen C convention: return true for the `ok` arm (see ret.is_err = !<ret>).
+bool exports_test_safe_divide(int32_t a, int32_t b, int32_t *ret, test_string_t *err) {
+    if (b == 0) {
+        test_string_dup(err, "division by zero");
+        return false;
+    }
+    *ret = a / b;
+    return true;
+}
+
 // String functions
 void exports_test_uppercase(test_string_t *s, test_string_t *ret) {
     ret->len = s->len;

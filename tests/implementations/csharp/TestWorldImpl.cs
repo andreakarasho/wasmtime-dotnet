@@ -43,6 +43,18 @@ public sealed class TestWorldExportsImpl : ITestWorldExports
 
     public static Point AddPoint(Point p1, Point p2) => new(p1.x + p2.x, p1.y + p2.y);
 
+    // result<s32, string>: wit-bindgen maps the ok arm to the return value and the err arm to
+    // a thrown WitException whose Value is the error payload.
+    public static int SafeDivide(int a, int b)
+    {
+        if (b == 0)
+        {
+            throw new WitException("division by zero", 0);
+        }
+
+        return a / b;
+    }
+
     public static void RegisterEntity(Entity e) => Entities[e.id] = e;
 
     public static void RegisterEntities(List<Entity> e)

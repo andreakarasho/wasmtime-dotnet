@@ -45,6 +45,8 @@ world type-tests {
     export return-status-list: func(statuses: list<status>) -> list<status>;
     export return-permission: func(permission: permission) -> permission;
     export return-permission-list: func(permissions: list<permission>) -> list<permission>;
+
+    export safe-divide: func(a: s32, b: s32) -> result<s32, string>;
 }
 
 world test {

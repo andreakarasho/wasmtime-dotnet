@@ -75,6 +75,14 @@ typedef struct {
   size_t len;
 } test_list_permission_t;
 
+typedef struct {
+  bool is_err;
+  union {
+    int32_t ok;
+    test_string_t err;
+  } val;
+} test_result_s32_string_t;
+
 // Imported Functions from `test`
 extern void test_callback(void);
 extern void test_callback_combine_string(test_string_t *s1, test_string_t *s2, test_string_t *ret);
@@ -111,6 +119,7 @@ test_status_t exports_test_return_status(test_status_t status);
 void exports_test_return_status_list(test_list_status_t *statuses, test_list_status_t *ret);
 test_permission_t exports_test_return_permission(test_permission_t permission);
 void exports_test_return_permission_list(test_list_permission_t *permissions, test_list_permission_t *ret);
+bool exports_test_safe_divide(int32_t a, int32_t b, int32_t *ret, test_string_t *err);
 
 // Helper Functions
 
@@ -129,6 +138,8 @@ void test_list_s32_free(test_list_s32_t *ptr);
 void test_list_status_free(test_list_status_t *ptr);
 
 void test_list_permission_free(test_list_permission_t *ptr);
+
+void test_result_s32_string_free(test_result_s32_string_t *ptr);
 
 // Transfers ownership of `s` into the string `ret`
 void test_string_set(test_string_t *ret, const char*s);

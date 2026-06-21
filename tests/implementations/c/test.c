@@ -133,6 +133,21 @@ void __wasm_export_exports_test_return_permission_list_post_return(uint8_t * arg
   }
 }
 
+__attribute__((__weak__, __export_name__("cabi_post_safe-divide")))
+void __wasm_export_exports_test_safe_divide_post_return(uint8_t * arg0) {
+  switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
+    case 0: {
+      break;
+    }
+    case 1: {
+      if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
+        free(*((uint8_t **) (arg0 + sizeof(void*))));
+      }
+      break;
+    }
+  }
+}
+
 // Canonical ABI intrinsics
 
 __attribute__((__weak__, __export_name__("cabi_realloc")))
@@ -213,6 +228,13 @@ void test_list_permission_free(test_list_permission_t *ptr) {
     for (size_t i = 0; i < list_len; i++) {
     }
     free(list_ptr);
+  }
+}
+
+void test_result_s32_string_free(test_result_s32_string_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+    test_string_free(&ptr->val.err);
   }
 }
 
@@ -513,6 +535,30 @@ uint8_t * __wasm_export_exports_test_return_permission_list(uint8_t * arg, size_
   uint8_t *ptr = (uint8_t *) &RET_AREA;
   *((size_t*)(ptr + sizeof(void*))) = (ret).len;
   *((uint8_t **)(ptr + 0)) = (uint8_t *) (ret).ptr;
+  return ptr;
+}
+
+__attribute__((__export_name__("safe-divide")))
+uint8_t * __wasm_export_exports_test_safe_divide(int32_t arg, int32_t arg0) {
+  test_result_s32_string_t ret;
+  int32_t ok;
+  test_string_t err;
+  ret.is_err = !exports_test_safe_divide(arg, arg0, &ok, &err);
+  if (ret.is_err) {
+    ret.val.err = err;
+  }
+  if (!ret.is_err) {
+    ret.val.ok = ok;
+  }
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  if ((ret).is_err) {
+    const test_string_t *payload1 = &(ret).val.err;*((int8_t*)(ptr + 0)) = 1;
+    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload1).len;
+    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload1).ptr;
+  } else {
+    const int32_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
+    *((int32_t*)(ptr + sizeof(void*))) = *payload;
+  }
   return ptr;
 }
 
