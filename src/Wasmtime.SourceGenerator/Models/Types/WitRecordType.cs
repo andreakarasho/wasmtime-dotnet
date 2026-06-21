@@ -17,7 +17,8 @@ public record WitRecordType(WitPackageNameVersion Package, string Name, Equatabl
 /// </summary>
 public readonly record struct WitField(
     string Name,
-    WitType Type
+    WitType Type,
+    bool IsStatic = false
 )
 {
     public string CSharpName { get; } = StringUtils.GetName(Name);

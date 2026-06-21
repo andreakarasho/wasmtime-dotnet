@@ -475,9 +475,11 @@ public static class HostWriter
             sb.AppendLine("{");
             sb.IncrementIndent();
 
-            // Methods on the nested class
+            // Methods on the nested class (instance methods only; static methods have no
+            // `self` so they are emitted on the imports class below).
             foreach (var method in resource.Fields)
             {
+                if (method.IsStatic) continue;
                 if (method.Type is WitFuncType methodFunc)
                 {
                     var methodName = StringUtils.GetName(method.Name);
@@ -501,6 +503,26 @@ public static class HostWriter
 
             sb.DecrementIndent();
             sb.AppendLine("}");
+            sb.AppendLine();
+
+            // --- Emit static methods on the imports class (no instance / no self) ---
+            foreach (var method in resource.Fields)
+            {
+                if (!method.IsStatic || method.Type is not WitFuncType staticFunc) continue;
+
+                sb.Append("public abstract ");
+                WriteParameters(sb, resolver, staticFunc.Results);
+                sb.Append(' ').Append(className).Append(StringUtils.GetName(method.Name)).Append('(');
+
+                for (var i = 0; i < staticFunc.Parameters.Length; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    var param = staticFunc.Parameters[i];
+                    param.Type.HostWriter.WriteParameter(sb, param.CSharpVariableName, resolver);
+                }
+
+                sb.AppendLine(");");
+            }
             sb.AppendLine();
 
             // --- Emit factory method for constructors ---
@@ -584,27 +606,34 @@ public static class HostWriter
                 imports.Add((abiName, interfacePath, ctorFunc));
             }
 
-            // Methods: [method]system.add-commands — with self prepended for ABI
+            // Methods: [method]system.add-commands — with self prepended for ABI.
+            // Static methods: [static]system.foo — no self.
             foreach (var method in resource.Fields)
             {
-                if (method.Type is WitFuncType methodFunc)
+                if (method.Type is not WitFuncType methodFunc) continue;
+
+                if (method.IsStatic)
                 {
-                    var selfParam = new WitFuncParameter("self", resType);
-                    var allParams = new WitFuncParameter[methodFunc.Parameters.Length + 1];
-                    allParams[0] = selfParam;
-                    for (var i = 0; i < methodFunc.Parameters.Length; i++)
-                    {
-                        allParams[i + 1] = methodFunc.Parameters[i];
-                    }
-
-                    var withSelf = new WitFuncType(
-                        new EquatableArray<WitFuncParameter>(allParams),
-                        methodFunc.Results
-                    );
-
-                    var abiName = $"[method]{resName}.{method.Name}";
-                    imports.Add((abiName, interfacePath, withSelf));
+                    var abiName = $"[static]{resName}.{method.Name}";
+                    imports.Add((abiName, interfacePath, methodFunc));
+                    continue;
                 }
+
+                var selfParam = new WitFuncParameter("self", resType);
+                var allParams = new WitFuncParameter[methodFunc.Parameters.Length + 1];
+                allParams[0] = selfParam;
+                for (var i = 0; i < methodFunc.Parameters.Length; i++)
+                {
+                    allParams[i + 1] = methodFunc.Parameters[i];
+                }
+
+                var withSelf = new WitFuncType(
+                    new EquatableArray<WitFuncParameter>(allParams),
+                    methodFunc.Results
+                );
+
+                var methodAbiName = $"[method]{resName}.{method.Name}";
+                imports.Add((methodAbiName, interfacePath, withSelf));
             }
 
             // Drop is handled by the resource destructor registered via DefineResource
@@ -1406,6 +1435,11 @@ public static class HostWriter
                 WriteMethodInvoke(sb, className, funcType, name, resolver);
                 return;
             }
+            if (name.StartsWith("[static]"))
+            {
+                WriteStaticInvoke(sb, className, funcType, name, resolver);
+                return;
+            }
             // Note: [resource-drop] is not an import — drop is handled by the resource
             // destructor registered via DefineResource (see WriteResourceImports).
 
@@ -1638,6 +1672,91 @@ public static class HostWriter
         }
 
         // Handle return values
+        if (funcType.Results.Length > 0)
+        {
+            sb.AppendLine();
+
+            for (var i = 0; i < funcType.Results.Length; i++)
+            {
+                var param = funcType.Results[i];
+                var variable = GetName(funcType, i);
+                param.HostWriter.WriteParameterInitializer(sb, variable, resolver, ignoreDispose: true, externallyOwned: true);
+            }
+
+            for (var i = 0; i < funcType.Results.Length; i++)
+            {
+                var variable = GetName(funcType, i);
+                var param = funcType.Results[i];
+                param.HostWriter.WriteParameterSetter(sb, "results", variable, i, ignoreDispose: true, resolver, externallyOwned: true);
+                i += param.HostWriter.GetParameterSize(resolver);
+            }
+        }
+
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+        sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Generates Invoke for [static]resource.method — no self; calls the static method
+    /// emitted on the imports class (named &lt;Resource&gt;&lt;Method&gt;).
+    /// </summary>
+    private static void WriteStaticInvoke(IndentedStringBuilder sb,
+        string className,
+        WitFuncType funcType,
+        string name,
+        ITypeContainerResolver resolver)
+    {
+        var importName = StringUtils.GetName(name);
+
+        // Parse: [static]counter.merge -> resource="counter", method="merge"
+        var afterPrefix = name.Substring("[static]".Length);
+        var dotIndex = afterPrefix.IndexOf('.');
+        var resClass = dotIndex >= 0 ? StringUtils.GetName(afterPrefix.Substring(0, dotIndex)) : "";
+        var methodName = dotIndex >= 0 ? StringUtils.GetName(afterPrefix.Substring(dotIndex + 1)) : importName;
+        var hostMethod = resClass + methodName;
+
+        sb.Append("private unsafe static void Invoke").Append(importName);
+        sb.AppendLine("(object? state, global::Wasmtime.ComponentCallResults args, global::Wasmtime.ComponentValue* results, global::Wasmtime.StoreContext context)");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.Append("var @this = (").Append(className).Append("Imports").AppendLine(")state!;");
+        sb.AppendLine();
+
+        // Extract parameters (no self for static)
+        for (var i = 0; i < funcType.Parameters.Length; i++)
+        {
+            var param = funcType.Parameters[i];
+            param.Type.HostWriter.WriteResultGetterInitializer(sb, "args", i, resolver);
+        }
+
+        if (funcType.Results.Length > 0)
+        {
+            WriteParameters(sb, resolver, funcType.Results);
+            sb.Append(" result = ");
+        }
+
+        sb.Append("@this.").Append(hostMethod);
+
+        if (funcType.Parameters.Length > 0)
+        {
+            sb.Append('(');
+            sb.IncrementIndent();
+            for (var i = 0; i < funcType.Parameters.Length; i++)
+            {
+                sb.AppendLine(i > 0 ? "," : "");
+                var param = funcType.Parameters[i];
+                param.Type.HostWriter.WriteResultGetter(sb, "args", i, resolver);
+            }
+            sb.DecrementIndent();
+            sb.AppendLine();
+            sb.AppendLine(");");
+        }
+        else
+        {
+            sb.AppendLine("();");
+        }
+
         if (funcType.Results.Length > 0)
         {
             sb.AppendLine();

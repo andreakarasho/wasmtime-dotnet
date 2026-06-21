@@ -347,7 +347,8 @@ public class Wit
                 .OfType<WitParser.ResourceFunctionContext>()
                 .Select(x => new WitField(
                     x.identifier().GetTextWithoutEscape(),
-                    typeVisitor.Visit(x.type())
+                    typeVisitor.Visit(x.type()),
+                    IsStatic: x.@static() is not null
                 ))
                 .ToArray();
 
