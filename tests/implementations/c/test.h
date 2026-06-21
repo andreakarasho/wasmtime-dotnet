@@ -37,6 +37,14 @@ typedef uint8_t tests_component_types_permission_t;
 #define TESTS_COMPONENT_TYPES_PERMISSION_WRITE (1 << 1)
 #define TESTS_COMPONENT_TYPES_PERMISSION_EXECUTE (1 << 2)
 
+typedef struct tests_component_host_counter_own_counter_t {
+  int32_t __handle;
+} tests_component_host_counter_own_counter_t;
+
+typedef struct tests_component_host_counter_borrow_counter_t {
+  int32_t __handle;
+} tests_component_host_counter_borrow_counter_t;
+
 typedef tests_component_types_entity_t test_entity_t;
 
 typedef tests_component_types_point_t test_point_t;
@@ -83,6 +91,11 @@ typedef struct {
   } val;
 } test_result_s32_string_t;
 
+// Imported Functions from `tests:component/host-counter@0.1.0`
+extern tests_component_host_counter_own_counter_t tests_component_host_counter_constructor_counter(int32_t initial);
+extern int32_t tests_component_host_counter_method_counter_increment(tests_component_host_counter_borrow_counter_t self, int32_t by);
+extern int32_t tests_component_host_counter_method_counter_value(tests_component_host_counter_borrow_counter_t self);
+
 // Imported Functions from `test`
 extern void test_callback(void);
 extern void test_callback_combine_string(test_string_t *s1, test_string_t *s2, test_string_t *ret);
@@ -102,6 +115,7 @@ void exports_test_host_combine_string(test_string_t *s1, test_string_t *s2, test
 void exports_test_combine_string(test_string_t *s1, test_string_t *s2, test_string_t *ret);
 void exports_test_accept_string(test_string_t *s);
 void exports_test_return_string(uint32_t length, test_string_t *ret);
+int32_t exports_test_use_counter(int32_t initial, int32_t by);
 uint8_t exports_test_add_u8(uint8_t x, uint8_t y);
 int8_t exports_test_add_s8(int8_t x, int8_t y);
 uint16_t exports_test_add_u16(uint16_t x, uint16_t y);
@@ -124,6 +138,10 @@ bool exports_test_safe_divide(int32_t a, int32_t b, int32_t *ret, test_string_t 
 // Helper Functions
 
 void tests_component_types_entity_free(tests_component_types_entity_t *ptr);
+
+extern void tests_component_host_counter_counter_drop_own(tests_component_host_counter_own_counter_t handle);
+
+extern tests_component_host_counter_borrow_counter_t tests_component_host_counter_borrow_counter(tests_component_host_counter_own_counter_t handle);
 
 void test_entity_free(test_entity_t *ptr);
 

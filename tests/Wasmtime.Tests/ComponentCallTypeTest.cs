@@ -269,4 +269,13 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
         Assert.False(result.IsOk);
         Assert.Equal("division by zero", result.Error);
     }
+
+    [Fact]
+    public void Resource_ImportedRoundtrip()
+    {
+        using var state = fixture.CreateState();
+
+        // Component constructs a host-provided counter(5), increments by 3, drops it.
+        Assert.Equal(8, state.Exports.UseCounter(5, 3));
+    }
 }

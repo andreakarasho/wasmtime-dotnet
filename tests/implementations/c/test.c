@@ -3,6 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Imported Functions from `tests:component/host-counter@0.1.0`
+
+__attribute__((__import_module__("tests:component/host-counter@0.1.0"), __import_name__("[constructor]counter")))
+extern int32_t __wasm_import_tests_component_host_counter_constructor_counter(int32_t);
+
+__attribute__((__import_module__("tests:component/host-counter@0.1.0"), __import_name__("[method]counter.increment")))
+extern int32_t __wasm_import_tests_component_host_counter_method_counter_increment(int32_t, int32_t);
+
+__attribute__((__import_module__("tests:component/host-counter@0.1.0"), __import_name__("[method]counter.value")))
+extern int32_t __wasm_import_tests_component_host_counter_method_counter_value(int32_t);
+
 // Imported Functions from `test`
 
 __attribute__((__import_module__("$root"), __import_name__("callback")))
@@ -73,6 +84,7 @@ void __wasm_export_exports_test_return_string_post_return(uint8_t * arg0) {
     free(*((uint8_t **) (arg0 + 0)));
   }
 }
+
 
 
 
@@ -163,6 +175,17 @@ void *cabi_realloc(void *ptr, size_t old_size, size_t align, size_t new_size) {
 
 void tests_component_types_entity_free(tests_component_types_entity_t *ptr) {
   test_string_free(&ptr->name);
+}
+
+__attribute__((__import_module__("tests:component/host-counter@0.1.0"), __import_name__("[resource-drop]counter")))
+extern void __wasm_import_tests_component_host_counter_counter_drop(int32_t handle);
+
+void tests_component_host_counter_counter_drop_own(tests_component_host_counter_own_counter_t handle) {
+  __wasm_import_tests_component_host_counter_counter_drop(handle.__handle);
+}
+
+tests_component_host_counter_borrow_counter_t tests_component_host_counter_borrow_counter(tests_component_host_counter_own_counter_t arg) {
+  return (tests_component_host_counter_borrow_counter_t) { arg.__handle };
 }
 
 void test_entity_free(test_entity_t *ptr) {
@@ -261,6 +284,21 @@ void test_string_free(test_string_t *ret) {
 
 __attribute__((__aligned__(sizeof(void*))))
 static uint8_t RET_AREA[(8+3*sizeof(void*))];
+
+tests_component_host_counter_own_counter_t tests_component_host_counter_constructor_counter(int32_t initial) {
+  int32_t ret = __wasm_import_tests_component_host_counter_constructor_counter(initial);
+  return (tests_component_host_counter_own_counter_t) { ret };
+}
+
+int32_t tests_component_host_counter_method_counter_increment(tests_component_host_counter_borrow_counter_t self, int32_t by) {
+  int32_t ret = __wasm_import_tests_component_host_counter_method_counter_increment((self).__handle, by);
+  return ret;
+}
+
+int32_t tests_component_host_counter_method_counter_value(tests_component_host_counter_borrow_counter_t self) {
+  int32_t ret = __wasm_import_tests_component_host_counter_method_counter_value((self).__handle);
+  return ret;
+}
 
 void test_callback(void) {
   __wasm_import_test_callback();
@@ -402,6 +440,12 @@ uint8_t * __wasm_export_exports_test_return_string(int32_t arg) {
   *((size_t*)(ptr + sizeof(void*))) = (ret).len;
   *((uint8_t **)(ptr + 0)) = (uint8_t *) (ret).ptr;
   return ptr;
+}
+
+__attribute__((__export_name__("use-counter")))
+int32_t __wasm_export_exports_test_use_counter(int32_t arg, int32_t arg0) {
+  int32_t ret = exports_test_use_counter(arg, arg0);
+  return ret;
 }
 
 __attribute__((__export_name__("add-u8")))

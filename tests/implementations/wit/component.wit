@@ -25,6 +25,14 @@ interface types {
     }
 }
 
+interface host-counter {
+    resource counter {
+        constructor(initial: s32);
+        increment: func(by: s32) -> s32;
+        value: func() -> s32;
+    }
+}
+
 world type-tests {
     use types.{point, status, permission};
 
@@ -75,4 +83,7 @@ world test {
     import callback: func();
     import callback-combine-string: func(s1: string, s2: string) -> string;
     import get-host-entity: func() -> entity;
+
+    import host-counter;
+    export use-counter: func(initial: s32, by: s32) -> s32;
 }

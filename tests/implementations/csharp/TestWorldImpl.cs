@@ -55,6 +55,13 @@ public sealed class TestWorldExportsImpl : ITestWorldExports
         return a / b;
     }
 
+    // Exercises the imported host counter resource: construct, increment, drop (via using).
+    public static int UseCounter(int initial, int by)
+    {
+        using var counter = new IHostCounterImports.Counter(initial);
+        return counter.Increment(by);
+    }
+
     public static void RegisterEntity(Entity e) => Entities[e.id] = e;
 
     public static void RegisterEntities(List<Entity> e)

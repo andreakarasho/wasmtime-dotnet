@@ -26,4 +26,26 @@ internal class TestImportsImpl : Wit.Tests.Component.TestImports
     {
         return Entity;
     }
+
+    // Imported resource: host provides the `counter` implementation the component constructs/uses.
+    public override Counter NewCounter(int initial) => new CounterImpl(initial);
+
+    private sealed class CounterImpl : Counter
+    {
+        private int _value;
+
+        public CounterImpl(int initial) => _value = initial;
+
+        public override int Increment(int by)
+        {
+            _value += by;
+            return _value;
+        }
+
+        public override int Value() => _value;
+
+        public override void Dispose()
+        {
+        }
+    }
 }

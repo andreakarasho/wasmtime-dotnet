@@ -98,6 +98,17 @@ bool exports_test_safe_divide(int32_t a, int32_t b, int32_t *ret, test_string_t 
     return true;
 }
 
+// Exercises an imported resource: construct a host counter, increment it, drop it.
+int32_t exports_test_use_counter(int32_t initial, int32_t by) {
+    tests_component_host_counter_own_counter_t counter =
+        tests_component_host_counter_constructor_counter(initial);
+    tests_component_host_counter_borrow_counter_t borrow =
+        tests_component_host_counter_borrow_counter(counter);
+    int32_t result = tests_component_host_counter_method_counter_increment(borrow, by);
+    tests_component_host_counter_counter_drop_own(counter);
+    return result;
+}
+
 // String functions
 void exports_test_uppercase(test_string_t *s, test_string_t *ret) {
     ret->len = s->len;
