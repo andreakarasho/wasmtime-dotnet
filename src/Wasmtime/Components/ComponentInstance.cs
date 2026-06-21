@@ -140,6 +140,62 @@ public unsafe class ComponentInstance
             : LoadFunction(name);
     }
 
+    /// <summary>
+    /// Gets a function exported within an interface instance (e.g. an exported resource's
+    /// constructor/methods, which are namespaced under the interface rather than at the root).
+    /// </summary>
+    public ComponentInstanceFunction GetFunction(string interfacePath, string name)
+    {
+        var key = interfacePath + " " + name;
+        return _cachedFunctions.TryGetValue(key, out var handle)
+            ? handle
+            : LoadFunctionNested(interfacePath, name, key);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private ComponentInstanceFunction LoadFunctionNested(string interfacePath, string name, string key)
+    {
+        if (!Lock.Wait(TimeSpan.FromSeconds(5)))
+        {
+            throw new TimeoutException("Could not acquire lock to load component function");
+        }
+
+        try
+        {
+#if NET
+            ObjectDisposedException.ThrowIf(_store.Disposed, nameof(Store));
+#else
+            if (_store.Disposed) throw new ObjectDisposedException(nameof(Store));
+#endif
+
+            if (!_component.TryGetExport(interfacePath, name, out var index))
+            {
+                throw new WasmtimeException($"Function '{name}' not found in interface '{interfacePath}'");
+            }
+
+            byte success;
+            wasmtime_component_func func;
+
+            fixed (wasmtime_component_instance* instance = &_handle)
+            {
+                success = wasmtime_component_instance_get_func(instance, _store.Context, index, &func);
+            }
+
+            if (success != 1)
+            {
+                throw new WasmtimeException($"Export '{name}' is not a function");
+            }
+
+            var function = new ComponentInstanceFunction(func);
+            _cachedFunctions[key] = function;
+            return function;
+        }
+        finally
+        {
+            Lock.Release();
+        }
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private ComponentInstanceFunction LoadFunction(string name)
     {

@@ -702,6 +702,31 @@ public struct ComponentValue : IDisposable
         => ToResourceRep(new StoreContext(store.Context));
 
     /// <summary>
+    /// Drops an owned resource handle (kind 21): runs the owning component's destructor and frees
+    /// the host-side handle memory, then clears this value. Use for <c>own&lt;resource&gt;</c> handles
+    /// returned from a component (no host-resource conversion is involved, unlike
+    /// <see cref="ToResourceRepAndDrop"/>).
+    /// </summary>
+    public unsafe void DropResource(StoreContext context)
+    {
+        if (_val.kind != 21)
+        {
+            throw new InvalidOperationException($"Cannot drop ComponentValue of kind {_val.kind} as a resource.");
+        }
+
+        if (_val.of.resource != null)
+        {
+            // any_drop performs component-model cleanup (incl. the guest destructor); any_delete
+            // then frees the host-side handle memory. Both are required per the wasmtime C API.
+            var error = wasmtime_component_resource_any_drop(context.Handle, _val.of.resource);
+            WasmtimeException.ThrowIfError(error);
+            wasmtime_component_resource_any_delete(_val.of.resource);
+        }
+
+        _val = default;
+    }
+
+    /// <summary>
     /// Extracts the discriminant and payload of a variant.
     /// </summary>
     public readonly unsafe (string Discriminant, ComponentValue? Payload) ToVariant()
