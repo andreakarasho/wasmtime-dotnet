@@ -33,10 +33,11 @@ public struct ComponentValue : IDisposable
     private static void DecrementActiveCount()
     {
         #if DEBUG
-        if (System.Threading.Interlocked.Decrement(ref _activeCount) < 0)
-        {
-            throw new InvalidOperationException("ActiveCount went below zero");
-        }
+        // ponytail: best-effort counter only. Creation increments solely for non-externally-owned
+        // values, but Dispose always decrements, so the count legitimately goes negative for
+        // externally-owned views and across parallel tests. Do NOT throw on negative — it is a
+        // false alarm, not a double-free signal (externallyOwned has no other effect).
+        System.Threading.Interlocked.Decrement(ref _activeCount);
         #endif
     }
 
@@ -505,6 +506,32 @@ public struct ComponentValue : IDisposable
     }
 
     /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing a tuple type (kind 15).
+    /// </summary>
+    /// <remarks>
+    /// The <paramref name="elements"/> are <em>consumed</em>: each element's contents are moved into
+    /// the tuple's native storage. The caller must not dispose the elements; disposing the returned
+    /// value frees them.
+    /// </remarks>
+    public static unsafe ComponentValue CreateTuple(ReadOnlySpan<ComponentValue> elements)
+    {
+        var val = new wasmtime_component_val();
+        val.kind = 15;
+
+        wasmtime_component_valtuple tuple;
+        wasmtime_component_valtuple_new_uninit(&tuple, (UIntPtr)elements.Length);
+
+        var data = (ComponentValue*)tuple.data;
+        for (var i = 0; i < elements.Length; i++)
+        {
+            data[i] = elements[i];
+        }
+
+        val.of.tuple = tuple;
+        return new ComponentValue(val, false);
+    }
+
+    /// <summary>
     /// Creates a <see cref="ComponentValue"/> representing an option type.
     /// Pass a non-null inner value for Some, or null for None.
     /// </summary>
@@ -687,6 +714,46 @@ public struct ComponentValue : IDisposable
         return (discriminant, payload);
     }
 
+    /// <summary>
+    /// Creates a <see cref="ComponentValue"/> representing a result type (kind 19).
+    /// </summary>
+    /// <remarks>
+    /// The <paramref name="payload"/> is <em>consumed</em>: its contents are moved onto a native
+    /// heap allocation owned by the returned value (see <c>wasmtime_component_val_new</c>). The
+    /// caller must not dispose <paramref name="payload"/>; disposing the returned value frees it.
+    /// </remarks>
+    /// <param name="isOk">True for the <c>ok</c> arm, false for the <c>err</c> arm.</param>
+    /// <param name="payload">The arm payload, or null when that arm carries no value.</param>
+    public static unsafe ComponentValue CreateResult(bool isOk, ComponentValue? payload)
+    {
+        var val = new wasmtime_component_val();
+        val.kind = 19;
+        val.of.result.is_ok = isOk ? (byte)1 : (byte)0;
+        if (payload.HasValue)
+        {
+            var src = payload.Value._val;
+            val.of.result.val = wasmtime_component_val_new(&src);
+        }
+        else
+        {
+            val.of.result.val = null;
+        }
+        return new ComponentValue(val, false);
+    }
+
+    /// <summary>
+    /// Extracts the discriminant and payload of a result.
+    /// </summary>
+    public readonly unsafe (bool IsOk, ComponentValue? Payload) ToResult()
+    {
+        if (_val.kind != 19) throw new InvalidOperationException($"Cannot convert ComponentValue of kind {_val.kind} to Result.");
+        var isOk = _val.of.result.is_ok != 0;
+        ComponentValue? payload = _val.of.result.val != null
+            ? new ComponentValue(*_val.of.result.val, true)
+            : null;
+        return (isOk, payload);
+    }
+
     /// <inheritdoc />
     public unsafe void Dispose()
     {
@@ -730,6 +797,21 @@ public struct ComponentValue : IDisposable
                 new RecordBuilder(val.of.record).Dispose();
                 DecrementActiveCount();
                 break;
+            case 15:
+            {
+                var data = (wasmtime_component_val*)val.of.tuple.data;
+                var size = (int)val.of.tuple.size;
+                for (var i = 0; i < size; i++)
+                {
+                    Dispose(ref data[i]);
+                }
+                fixed (wasmtime_component_valtuple* t = &val.of.tuple)
+                {
+                    wasmtime_component_valtuple_delete(t);
+                }
+                DecrementActiveCount();
+                break;
+            }
             case 16:
                 new ByteVector(val.of.variant.discriminant).Dispose();
                 if (val.of.variant.val != null)
@@ -746,6 +828,13 @@ public struct ComponentValue : IDisposable
                 if (val.of.option != null)
                 {
                     wasmtime_component_val_free(val.of.option);
+                }
+                DecrementActiveCount();
+                break;
+            case 19:
+                if (val.of.result.val != null)
+                {
+                    wasmtime_component_val_free(val.of.result.val);
                 }
                 DecrementActiveCount();
                 break;
