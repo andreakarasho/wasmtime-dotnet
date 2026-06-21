@@ -10,7 +10,8 @@ internal unsafe class ComponentCallResultsInternal : IDisposable
 
     internal static ComponentCallResultsInternal ThreadInstance => _cachedInstance ??= new ComponentCallResultsInternal();
 
-    public readonly ComponentValue[] Array;
+    // Reused per-thread; grows only when a call returns more results than the current capacity.
+    public ComponentValue[] Array;
     private wasmtime_component_func _func;
     private wasmtime_context* _context;
     private SemaphoreSlim? _semaphore;
@@ -27,6 +28,12 @@ internal unsafe class ComponentCallResultsInternal : IDisposable
         if (_semaphore is not null)
         {
             throw new InvalidOperationException("This instance is already in use.");
+        }
+
+        // Guard against buffer overflow when wasmtime writes `count` results into Array.
+        if (Array.Length < count)
+        {
+            Array = new ComponentValue[count];
         }
 
         Length = count;
