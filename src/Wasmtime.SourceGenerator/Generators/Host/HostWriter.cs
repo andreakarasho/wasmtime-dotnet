@@ -428,6 +428,7 @@ public static class HostWriter
             var resType = resource.Type;
             var typeId = nextResourceTypeId++;
             var className = StringUtils.GetName(resName);
+            var interfaceName = "I" + className;
             var fieldName = "_" + StringUtils.GetName(resName, uppercaseFirst: false);
             var handleTableField = fieldName + "Handles";
             var handleCounterField = "_next" + className + "Handle";
@@ -438,6 +439,7 @@ public static class HostWriter
             {
                 rhw.TypeId = typeId;
                 rhw.ClassName = className;
+                rhw.TypeName = interfaceName;
                 rhw.HandleTableField = handleTableField;
                 rhw.HandleCounterField = handleCounterField;
                 rhw.StoreMethodName = registerMethodName;
@@ -458,10 +460,11 @@ public static class HostWriter
         foreach (var (resource, resName, className, handleTableField, handleCounterField, registerMethodName, dropMethodName, typeId) in resourceInfos)
         {
             var resType = resource.Type;
+            var interfaceName = "I" + className;
 
             // --- Emit handle table field, counter, free list, and debug generation tracking ---
-            sb.Append("private readonly global::System.Collections.Generic.Dictionary<uint, ").Append(className).Append("> ")
-                .Append(handleTableField).Append(" = new global::System.Collections.Generic.Dictionary<uint, ").Append(className).AppendLine(">();");
+            sb.Append("private readonly global::System.Collections.Generic.Dictionary<uint, ").Append(interfaceName).Append("> ")
+                .Append(handleTableField).Append(" = new global::System.Collections.Generic.Dictionary<uint, ").Append(interfaceName).AppendLine(">();");
             sb.Append("private uint ").Append(handleCounterField).AppendLine(" = 1;");
             sb.Append("private readonly global::System.Collections.Generic.Stack<uint> _free").Append(className).AppendLine("Handles = new();");
             sb.AppendLine("#if DEBUG");
@@ -470,20 +473,25 @@ public static class HostWriter
             sb.AppendLine("#endif");
             sb.AppendLine();
 
-            // --- Emit nested abstract class ---
-            sb.Append("public abstract class ").Append(className).AppendLine(" : global::System.IDisposable");
+            // --- Emit nested interface ---
+            // An interface (not an abstract class) so the host can implement the resource on
+            // either a struct or a class: C# allows only one base type but any number of
+            // interfaces, so a struct or an existing class can satisfy the contract.
+            // (Struct impls box once when stored in the handle table — same single allocation
+            // a class costs, no per-call overhead.) Dispose comes from IDisposable.
+            sb.Append("public interface ").Append(interfaceName).AppendLine(" : global::System.IDisposable");
             sb.AppendLine("{");
             sb.IncrementIndent();
 
-            // Methods on the nested class (instance methods only; static methods have no
-            // `self` so they are emitted on the imports class below).
+            // Methods on the nested interface (instance methods only; static methods have no
+            // `self` so they are emitted on the imports class below). Interface members are
+            // implicitly public + abstract, so no modifiers are written.
             foreach (var method in resource.Fields)
             {
                 if (method.IsStatic) continue;
                 if (method.Type is WitFuncType methodFunc)
                 {
                     var methodName = StringUtils.GetName(method.Name);
-                    sb.Append("public abstract ");
                     WriteParameters(sb, resolver, methodFunc.Results);
                     sb.Append(' ').Append(methodName).Append('(');
 
@@ -498,8 +506,7 @@ public static class HostWriter
                 }
             }
 
-            // Dispose method
-            sb.AppendLine("public abstract void Dispose();");
+            // Dispose is inherited from IDisposable — no redeclaration needed.
 
             sb.DecrementIndent();
             sb.AppendLine("}");
@@ -529,7 +536,7 @@ public static class HostWriter
             foreach (var ctor in resource.Constructors)
             {
                 var factoryName = "New" + className;
-                sb.Append("public abstract ").Append(className).Append(' ').Append(factoryName).Append('(');
+                sb.Append("public abstract ").Append(interfaceName).Append(' ').Append(factoryName).Append('(');
 
                 for (var i = 0; i < ctor.Parameters.Length; i++)
                 {
@@ -544,7 +551,7 @@ public static class HostWriter
             // --- Emit Register method (public, for host-created resources) ---
             var genField = "_" + StringUtils.GetName(resName, uppercaseFirst: false) + "Generation";
             var gensField = "_" + StringUtils.GetName(resName, uppercaseFirst: false) + "Generations";
-            sb.Append("public uint ").Append(registerMethodName).Append("(").Append(className).AppendLine(" obj)");
+            sb.Append("public uint ").Append(registerMethodName).Append("(").Append(interfaceName).AppendLine(" obj)");
             sb.AppendLine("{");
             sb.IncrementIndent();
             sb.Append("var h = _free").Append(className).Append("Handles.Count > 0 ? _free").Append(className).Append("Handles.Pop() : checked(").Append(handleCounterField).AppendLine("++);");
@@ -580,7 +587,7 @@ public static class HostWriter
 
             // --- Emit debug-only validated lookup helper ---
             sb.AppendLine("#if DEBUG");
-            sb.Append("private ").Append(className).Append(" Get").Append(className).AppendLine("(uint handle)");
+            sb.Append("private ").Append(interfaceName).Append(" Get").Append(className).AppendLine("(uint handle)");
             sb.AppendLine("{");
             sb.IncrementIndent();
             sb.Append("if (!").Append(handleTableField).AppendLine(".TryGetValue(handle, out var obj))");

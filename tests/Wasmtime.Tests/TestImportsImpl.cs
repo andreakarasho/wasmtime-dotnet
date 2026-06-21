@@ -28,28 +28,30 @@ internal class TestImportsImpl : Wit.Tests.Component.TestImports
     }
 
     // Imported resource: host provides the `counter` implementation the component constructs/uses.
-    public override Counter NewCounter(int initial) => new CounterImpl(initial);
+    public override ICounter NewCounter(int initial) => new CounterImpl(initial);
 
     // Static method on the imported resource (no instance / no self).
     public override int CounterMerge(int a, int b) => a + b;
 
     internal static int CounterDisposeCount;
 
-    private sealed class CounterImpl : Counter
+    // A struct, to exercise that the generated resource type is an interface the host may
+    // implement on either a struct or a class. (It boxes once when stored in the handle table.)
+    private struct CounterImpl : ICounter
     {
         private int _value;
 
         public CounterImpl(int initial) => _value = initial;
 
-        public override int Increment(int by)
+        public int Increment(int by)
         {
             _value += by;
             return _value;
         }
 
-        public override int Value() => _value;
+        public int Value() => _value;
 
-        public override void Dispose()
+        public void Dispose()
         {
             System.Threading.Interlocked.Increment(ref CounterDisposeCount);
         }

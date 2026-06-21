@@ -21,10 +21,18 @@ public class ResourceHostWriter(
     public uint TypeId { get; set; }
 
     /// <summary>
-    /// The C# class name for this resource (e.g., "System", "EntityCommands").
+    /// The C# member-name base for this resource (e.g., "System", "EntityCommands").
+    /// Used for helper member names — RegisterSystem, DropSystem, GetSystem, SystemTypeId.
     /// Set during resource processing in WriteResourceImports.
     /// </summary>
     public string? ClassName { get; set; }
+
+    /// <summary>
+    /// The C# interface name for this resource (e.g., "ISystem"). Used wherever the resource
+    /// appears as a type — signatures, the handle table, factory return values. Distinct from
+    /// <see cref="ClassName"/>, which names the generated helper members.
+    /// </summary>
+    public string? TypeName { get; set; }
 
     /// <summary>
     /// The handle table field name on the parent imports class (e.g., "_systemHandles").
@@ -45,9 +53,9 @@ public class ResourceHostWriter(
     /// <inheritdoc />
     public override void WriteCSharpType(IndentedStringBuilder sb, ITypeContainerResolver resolver)
     {
-        if (!ExportContext && ClassName != null)
+        if (!ExportContext && TypeName != null)
         {
-            sb.Append(ClassName);
+            sb.Append(TypeName);
         }
         else
         {

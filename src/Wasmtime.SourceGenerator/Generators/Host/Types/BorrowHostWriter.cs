@@ -10,9 +10,9 @@ public class BorrowHostWriter(
     public override void WriteCSharpType(IndentedStringBuilder sb, ITypeContainerResolver resolver)
     {
         var rhw = ResolveResourceHostWriter(resolver);
-        if (!ResourceHostWriter.ExportContext && rhw?.ClassName != null)
+        if (!ResourceHostWriter.ExportContext && rhw?.TypeName != null)
         {
-            sb.Append(rhw.ClassName);
+            sb.Append(rhw.TypeName);
         }
         else
         {
