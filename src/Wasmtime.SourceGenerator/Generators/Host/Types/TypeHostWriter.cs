@@ -13,6 +13,14 @@ public class TypeHostWriter(WitTypeKind kind)
     /// <param name="resolver"></param>
     public virtual void WriteCSharpType(IndentedStringBuilder sb, ITypeContainerResolver resolver)
     {
+        if (kind is WitTypeKind.Future or WitTypeKind.Stream)
+        {
+            // Component-model async: the wasmtime C API exposes no async call path and no
+            // future/stream value representation (wasmtime_component_val has no such kind), so
+            // these cannot be marshalled. Functions using them are skipped with this message.
+            throw new NotSupportedException($"WIT '{kind}' (component-model async) is not supported by the wasmtime C API.");
+        }
+
         sb.Append(kind switch
         {
             WitTypeKind.Bool => "bool",

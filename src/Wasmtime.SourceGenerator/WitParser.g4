@@ -37,6 +37,9 @@ type
     | Result OpenAngle type CloseAngle                                          # ResultNoErrorType
     | Result                                                                    # ResultEmptyType
     | Stream OpenAngle type CloseAngle                                          # StreamType
+    | Stream                                                                    # StreamEmptyType
+    | Future OpenAngle type CloseAngle                                          # FutureType
+    | Future                                                                    # FutureEmptyType
     | Tuple OpenAngle (type (Comma type)*)? CloseAngle                          # TupleType
     | func                                                                      # FuncType
     | Borrow OpenAngle type CloseAngle                                          # BorrowType

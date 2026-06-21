@@ -59,6 +59,23 @@ public class WitTypeVisitor(WitPackageNameVersion package) : WitParserBaseVisito
         );
     }
 
+    public override WitType VisitStreamEmptyType(WitParser.StreamEmptyTypeContext context)
+    {
+        return new WitType(WitTypeKind.Stream);
+    }
+
+    public override WitType VisitFutureType(WitParser.FutureTypeContext context)
+    {
+        return new WitFutureType(
+            Visit(context.type())
+        );
+    }
+
+    public override WitType VisitFutureEmptyType(WitParser.FutureEmptyTypeContext context)
+    {
+        return new WitType(WitTypeKind.Future);
+    }
+
     public override WitType VisitResultNoErrorType(WitParser.ResultNoErrorTypeContext context)
     {
         return new WitResultNoErrorType(
