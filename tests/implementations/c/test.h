@@ -169,6 +169,8 @@ bool exports_test_maybe_double(int32_t *maybe_x, int32_t *ret);
 // Exported Functions from `tests:component/accumulator-api@0.1.0`
 exports_tests_component_accumulator_api_own_accumulator_t exports_tests_component_accumulator_api_constructor_accumulator(int32_t start);
 int32_t exports_tests_component_accumulator_api_method_accumulator_add(exports_tests_component_accumulator_api_borrow_accumulator_t self, int32_t n);
+int32_t exports_tests_component_accumulator_api_static_accumulator_combine(int32_t a, int32_t b);
+void exports_tests_component_accumulator_api_describe(test_string_t *ret);
 
 // Helper Functions
 

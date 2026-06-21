@@ -43,7 +43,10 @@ interface accumulator-api {
     resource accumulator {
         constructor(start: s32);
         add: func(n: s32) -> s32;
+        combine: static func(a: s32, b: s32) -> s32;
     }
+
+    describe: func() -> string;
 }
 
 world type-tests {

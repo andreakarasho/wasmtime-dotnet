@@ -161,6 +161,16 @@ void exports_tests_component_accumulator_api_accumulator_destructor(
     free(rep);
 }
 
+// Static method on the exported resource (no instance).
+int32_t exports_tests_component_accumulator_api_static_accumulator_combine(int32_t a, int32_t b) {
+    return a + b;
+}
+
+// Free function inside the exported interface.
+void exports_tests_component_accumulator_api_describe(test_string_t *ret) {
+    test_string_dup(ret, "accumulator-api");
+}
+
 // Exercises an imported resource: construct a host counter, increment it, drop it.
 int32_t exports_test_use_counter(int32_t initial, int32_t by) {
     tests_component_host_counter_own_counter_t counter =

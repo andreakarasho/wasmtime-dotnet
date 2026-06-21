@@ -683,9 +683,9 @@ public static class HostWriter
 
                 foreach (var field in interfaceType.Fields)
                 {
-                    if (field.Type is WitFuncType)
+                    if (field.Type is WitFuncType fieldFunc)
                     {
-                        WriteExport(sb, field.Name, field.Type, projectResolver);
+                        WriteExport(sb, fieldFunc, field.Name, projectResolver, interfacePath);
                     }
                 }
 
@@ -743,6 +743,42 @@ public static class HostWriter
                 onResult: () =>
                 {
                     sb.Append("return new ").Append(className).AppendLine("(__result[0], _instance, _store);");
+                });
+
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
+        // --- Static methods on the Exports class (no instance / no self) ---
+        foreach (var method in resource.Fields)
+        {
+            if (!method.IsStatic || method.Type is not WitFuncType sf) continue;
+
+            sb.Append("public unsafe ");
+            WriteParameters(sb, resolver, sf.Results);
+            sb.Append(' ').Append(className).Append(StringUtils.GetName(method.Name)).Append('(');
+            for (var i = 0; i < sf.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var p = sf.Parameters[i];
+                p.Type.HostWriter.WriteParameter(sb, p.CSharpVariableName, resolver);
+            }
+            sb.AppendLine(")");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.Append("var __fn = _instance.GetFunction(\"").Append(interfacePath).Append("\", \"[static]").Append(resName).Append('.').Append(method.Name).AppendLine("\");");
+
+            WriteExportedResourceCall(sb, sf.Parameters, sf.Results, selfHandle: null, resolver,
+                onResult: () =>
+                {
+                    if (sf.Results.Length == 1)
+                    {
+                        sf.Results[0].HostWriter.WriteResultGetterInitializer(sb, "__result", 0, resolver);
+                        sb.Append("return ");
+                        sf.Results[0].HostWriter.WriteResultGetter(sb, "__result", 0, resolver);
+                        sb.AppendLine(";");
+                    }
                 });
 
             sb.DecrementIndent();
@@ -1436,7 +1472,8 @@ public static class HostWriter
         IndentedStringBuilder sb,
         WitFuncType funcType,
         string name,
-        ITypeContainerResolver resolver)
+        ITypeContainerResolver resolver,
+        string? interfacePath = null)
     {
         sb.Append("");
         var resetter = sb.CreateResetter();
@@ -1511,13 +1548,26 @@ public static class HostWriter
                 sb.IncrementIndent();
             }
 
-            sb.Append("using global::Wasmtime.ComponentCallResults result = _instance.Call(\"")
-                .Append(name)
-                .Append("\", ")
-                .Append(funcType.Results.Length)
-                .Append(", parameters, ")
-                .Append(parameterSize)
-                .AppendLine(");");
+            if (interfacePath != null)
+            {
+                // Function exported within an interface: resolve under the interface instance.
+                sb.Append("var __callFn = _instance.GetFunction(\"").Append(interfacePath).Append("\", \"").Append(name).AppendLine("\");");
+                sb.Append("using global::Wasmtime.ComponentCallResults result = _instance.Call(__callFn, ")
+                    .Append(funcType.Results.Length)
+                    .Append(", parameters, ")
+                    .Append(parameterSize)
+                    .AppendLine(");");
+            }
+            else
+            {
+                sb.Append("using global::Wasmtime.ComponentCallResults result = _instance.Call(\"")
+                    .Append(name)
+                    .Append("\", ")
+                    .Append(funcType.Results.Length)
+                    .Append(", parameters, ")
+                    .Append(parameterSize)
+                    .AppendLine(");");
+            }
 
             if (funcType.Results.Length > 0)
             {

@@ -194,6 +194,14 @@ void __wasm_export_exports_test_variant_tag_post_return(uint8_t * arg0) {
 
 
 
+
+__attribute__((__weak__, __export_name__("cabi_post_tests:component/accumulator-api@0.1.0#describe")))
+void __wasm_export_exports_tests_component_accumulator_api_describe_post_return(uint8_t * arg0) {
+  if ((*((size_t*) (arg0 + sizeof(void*)))) > 0) {
+    free(*((uint8_t **) (arg0 + 0)));
+  }
+}
+
 // Canonical ABI intrinsics
 
 __attribute__((__weak__, __export_name__("cabi_realloc")))
@@ -787,6 +795,22 @@ __attribute__((__export_name__("tests:component/accumulator-api@0.1.0#[method]ac
 int32_t __wasm_export_exports_tests_component_accumulator_api_method_accumulator_add(uint8_t * arg, int32_t arg0) {
   int32_t ret = exports_tests_component_accumulator_api_method_accumulator_add(((exports_tests_component_accumulator_api_accumulator_t*) arg), arg0);
   return ret;
+}
+
+__attribute__((__export_name__("tests:component/accumulator-api@0.1.0#[static]accumulator.combine")))
+int32_t __wasm_export_exports_tests_component_accumulator_api_static_accumulator_combine(int32_t arg, int32_t arg0) {
+  int32_t ret = exports_tests_component_accumulator_api_static_accumulator_combine(arg, arg0);
+  return ret;
+}
+
+__attribute__((__export_name__("tests:component/accumulator-api@0.1.0#describe")))
+uint8_t * __wasm_export_exports_tests_component_accumulator_api_describe(void) {
+  test_string_t ret;
+  exports_tests_component_accumulator_api_describe(&ret);
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  *((size_t*)(ptr + sizeof(void*))) = (ret).len;
+  *((uint8_t **)(ptr + 0)) = (uint8_t *) (ret).ptr;
+  return ptr;
 }
 
 // Ensure that the *_component_type.o object is linked in

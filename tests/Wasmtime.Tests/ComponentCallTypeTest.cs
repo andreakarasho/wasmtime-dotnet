@@ -331,6 +331,22 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
     }
 
     [Fact]
+    public void ExportedResource_StaticMethod()
+    {
+        using var state = fixture.CreateState();
+
+        Assert.Equal(7, state.Exports.AccumulatorCombine(3, 4));
+    }
+
+    [Fact]
+    public void ExportedInterface_FreeFunction()
+    {
+        using var state = fixture.CreateState();
+
+        Assert.Equal("accumulator-api", state.Exports.Describe());
+    }
+
+    [Fact]
     public void Resource_DropInvokesHostDispose()
     {
         // Regression guard: when the component drops the imported resource, wasmtime must invoke
