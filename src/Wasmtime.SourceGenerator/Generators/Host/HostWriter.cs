@@ -240,7 +240,7 @@ public static class HostWriter
                 foreach (var group in instanceGroups)
                 {
                     sb.AppendLine();
-                    var instanceVarName = "instance_" + group.Key.Replace(":", "_").Replace("/", "_").Replace("@", "_").Replace(".", "_");
+                    var instanceVarName = "instance_" + group.Key.Replace(":", "_").Replace("/", "_").Replace("@", "_").Replace(".", "_").Replace("-", "_");
                     sb.Append("using var ").Append(instanceVarName).Append(" = linker.DefineInstance(\"").Append(group.Key).AppendLine("\");");
 
                     // DefineResource for each resource in this instance
@@ -533,9 +533,12 @@ public static class HostWriter
             sb.Append("protected void ").Append(dropMethodName).AppendLine("(uint handle)");
             sb.AppendLine("{");
             sb.IncrementIndent();
-            sb.Append("if (").Append(handleTableField).AppendLine(".Remove(handle, out var obj))");
+            // TryGetValue + Remove rather than Remove(key, out) — the 2-arg overload is
+            // unavailable on .NET Framework (netstandard2.0 target).
+            sb.Append("if (").Append(handleTableField).AppendLine(".TryGetValue(handle, out var obj))");
             sb.AppendLine("{");
             sb.IncrementIndent();
+            sb.Append(handleTableField).AppendLine(".Remove(handle);");
             sb.Append("_free").Append(className).AppendLine("Handles.Push(handle);");
             sb.AppendLine("#if DEBUG");
             sb.Append(gensField).Append("[handle] = ++").Append(genField).AppendLine(";");
