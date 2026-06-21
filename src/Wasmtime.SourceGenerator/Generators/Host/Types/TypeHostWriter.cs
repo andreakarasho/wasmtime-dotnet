@@ -28,7 +28,6 @@ public class TypeHostWriter(WitTypeKind kind)
             WitTypeKind.F64 => "double",
             WitTypeKind.Char => "char",
             WitTypeKind.String => "string",
-            WitTypeKind.Result => "global::Wasmtime.Result",
             _ => throw new NotSupportedException($"C# type mapping is not supported for WIT type kind '{kind}'"),
         });
     }
@@ -119,7 +118,6 @@ public class TypeHostWriter(WitTypeKind kind)
             WitTypeKind.F64 => "ToDouble",
             WitTypeKind.Char => "ToChar",
             WitTypeKind.String => "ToStringValue",
-            WitTypeKind.Result => "ToResult",
             _ => throw new NotSupportedException($"Return type '{kind}' is not supported.")
         });
 

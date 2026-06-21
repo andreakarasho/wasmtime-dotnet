@@ -21,7 +21,7 @@ public record WitType(WitTypeKind Kind)
     public static WitType F64 { get; } = new(WitTypeKind.F64);
     public static WitType Char { get; } = new(WitTypeKind.Char);
     public static WitType String { get; } = new(WitTypeKind.String);
-    public static WitType EmptyResult { get; } = new(WitTypeKind.Result);
+    public static WitType EmptyResult { get; } = new WitResultEmptyType();
 
     public virtual TypeHostWriter HostWriter => new(Kind);
 }

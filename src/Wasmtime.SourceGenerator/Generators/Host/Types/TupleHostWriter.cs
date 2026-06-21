@@ -48,6 +48,16 @@ public class TupleHostWriter(EquatableArray<WitType> elementTypes) : TypeHostWri
     protected override void WriteCreateComponentValue(IndentedStringBuilder sb, string paramKey,
         ITypeContainerResolver resolver, bool externallyOwned)
     {
-        sb.Append("default");
+        // Build a tuple ComponentValue from the C# ValueTuple's elements (.Item1, .Item2, ...).
+        // CreateTuple consumes each element, so emit them with ignoreDispose: true.
+        // Array-backed (not stackalloc): ComponentValue holds native pointers, which .NET
+        // Framework's stackalloc->Span path rejects.
+        sb.Append("global::Wasmtime.ComponentValue.CreateTuple(new global::Wasmtime.ComponentValue[] { ");
+        for (var i = 0; i < elementTypes.Length; i++)
+        {
+            if (i > 0) sb.Append(", ");
+            elementTypes[i].HostWriter.WriteComponentValue(sb, $"{paramKey}.Item{i + 1}", ignoreDispose: true, resolver, externallyOwned);
+        }
+        sb.Append(" })");
     }
 }
