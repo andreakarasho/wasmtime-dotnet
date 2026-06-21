@@ -92,8 +92,37 @@ public class VariantHostWriter(WitPackageNameVersion package, string name, Equat
         }
         else
         {
-            // For variants with payloads, generate a switch on the discriminant
-            sb.Append("global::Wasmtime.ComponentValue.CreateVariant(\"unknown\", null)");
+            // Switch on the C# discriminant to build the matching native variant.
+            sb.Append('(').Append(paramKey).AppendLine(".Discriminant switch");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+
+            foreach (var caseItem in cases)
+            {
+                var caseName = StringUtils.GetName(caseItem.Name);
+                WriteCSharpType(sb, resolver);
+                sb.Append(".Case.").Append(caseName).Append(" => global::Wasmtime.ComponentValue.CreateVariant(\"")
+                    .Append(caseItem.Name).Append("\", ");
+
+                if (caseItem.Type != null)
+                {
+                    sb.Append("(global::Wasmtime.ComponentValue?)(");
+                    caseItem.Type.HostWriter.WriteComponentValue(sb, $"{paramKey}.{caseName}Payload", ignoreDispose: true, resolver, externallyOwned);
+                    sb.Append(')');
+                }
+                else
+                {
+                    sb.Append("(global::Wasmtime.ComponentValue?)null");
+                }
+
+                sb.AppendLine("),");
+            }
+
+            sb.Append("_ => throw new global::System.InvalidOperationException(\"Unknown variant case for ");
+            WriteCSharpType(sb, resolver);
+            sb.AppendLine("\")");
+            sb.DecrementIndent();
+            sb.Append("})");
         }
     }
 
