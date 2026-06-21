@@ -643,8 +643,10 @@ public static class HostWriter
 
     private static void WriteExport(IndentedStringBuilder sb, string name, WitType type, ProjectTypeContainerResolver projectResolver)
     {
+        WitCustomType? originalCustomType = null;
         if (type is WitCustomType customType)
         {
+            originalCustomType = customType;
             type = customType.Resolve(projectResolver);
         }
 
@@ -658,9 +660,44 @@ public static class HostWriter
             }
             else if (type is WitInterfaceType interfaceType)
             {
+                // Resolve the interface path + definition so exported resources can be reached
+                // (their [constructor]/[method] functions are namespaced under the interface).
+                string? interfacePath = null;
+                WitInterface? witInterface = null;
+                if (originalCustomType != null)
+                {
+                    interfacePath = BuildInterfacePath(originalCustomType);
+                    try
+                    {
+                        var container = originalCustomType.GetContainer(projectResolver, allowContainer: true);
+                        if (container.TryGetContainer(originalCustomType.Name, out var ic) && ic is WitInterface iface)
+                        {
+                            witInterface = iface;
+                        }
+                    }
+                    catch
+                    {
+                        // No resource support for this interface.
+                    }
+                }
+
                 foreach (var field in interfaceType.Fields)
                 {
-                    WriteExport(sb, field.Name, field.Type, projectResolver);
+                    if (field.Type is WitFuncType)
+                    {
+                        WriteExport(sb, field.Name, field.Type, projectResolver);
+                    }
+                }
+
+                if (witInterface != null && interfacePath != null)
+                {
+                    foreach (var item in witInterface.Definitions.Items)
+                    {
+                        if (item is WitResource resource)
+                        {
+                            WriteExportedResource(sb, interfacePath, resource, projectResolver);
+                        }
+                    }
                 }
             }
             else
@@ -671,8 +708,174 @@ public static class HostWriter
         catch (Exception e)
         {
             resetter.Reset();
-            sb.AppendLine($"// Failed to generate function '{name}': {e.Message}");
+            sb.AppendLine($"// Failed to generate export '{name}': {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// Generates host-side accessors for a component-exported resource: a factory method on the
+    /// Exports class plus a wrapper class (holding the own&lt;resource&gt; handle) with the instance
+    /// methods and a Dispose that drops the handle. Constructor/method functions are resolved
+    /// under the exporting interface.
+    /// </summary>
+    private static void WriteExportedResource(IndentedStringBuilder sb, string interfacePath, WitResource resource, ITypeContainerResolver resolver)
+    {
+        var className = StringUtils.GetName(resource.Name);
+        var resName = resource.Name;
+
+        // --- Factory method(s) on the Exports class ---
+        foreach (var ctor in resource.Constructors)
+        {
+            sb.Append("public unsafe ").Append(className).Append(" New").Append(className).Append('(');
+            for (var i = 0; i < ctor.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var p = ctor.Parameters[i];
+                p.Type.HostWriter.WriteParameter(sb, p.CSharpVariableName, resolver);
+            }
+            sb.AppendLine(")");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.Append("var __fn = _instance.GetFunction(\"").Append(interfacePath).Append("\", \"[constructor]").Append(resName).AppendLine("\");");
+
+            // The constructor returns exactly one result: the own<resource> handle.
+            WriteExportedResourceCall(sb, ctor.Parameters, new EquatableArray<WitType>(new WitType[] { resource.Type }), selfHandle: null, resolver,
+                onResult: () =>
+                {
+                    sb.Append("return new ").Append(className).AppendLine("(__result[0], _instance, _store);");
+                });
+
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
+        // --- Wrapper class holding the own<resource> handle ---
+        sb.Append("public sealed unsafe class ").Append(className).AppendLine(" : global::System.IDisposable");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.AppendLine("private global::Wasmtime.ComponentValue _handle;");
+        sb.AppendLine("private readonly global::Wasmtime.ComponentInstance _instance;");
+        sb.AppendLine("private readonly global::Wasmtime.Store _store;");
+        sb.AppendLine("private bool _disposed;");
+        sb.AppendLine();
+        sb.Append("internal ").Append(className).AppendLine("(global::Wasmtime.ComponentValue handle, global::Wasmtime.ComponentInstance instance, global::Wasmtime.Store store)");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.AppendLine("_handle = handle; _instance = instance; _store = store;");
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+        sb.AppendLine();
+
+        foreach (var method in resource.Fields)
+        {
+            if (method.IsStatic || method.Type is not WitFuncType mf) continue;
+
+            sb.Append("public unsafe ");
+            WriteParameters(sb, resolver, mf.Results);
+            sb.Append(' ').Append(StringUtils.GetName(method.Name)).Append('(');
+            for (var i = 0; i < mf.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var p = mf.Parameters[i];
+                p.Type.HostWriter.WriteParameter(sb, p.CSharpVariableName, resolver);
+            }
+            sb.AppendLine(")");
+            sb.AppendLine("{");
+            sb.IncrementIndent();
+            sb.Append("var __fn = _instance.GetFunction(\"").Append(interfacePath).Append("\", \"[method]").Append(resName).Append('.').Append(method.Name).AppendLine("\");");
+
+            WriteExportedResourceCall(sb, mf.Parameters, mf.Results, selfHandle: "_handle", resolver,
+                onResult: () =>
+                {
+                    if (mf.Results.Length == 1)
+                    {
+                        mf.Results[0].HostWriter.WriteResultGetterInitializer(sb, "__result", 0, resolver);
+                        sb.Append("return ");
+                        mf.Results[0].HostWriter.WriteResultGetter(sb, "__result", 0, resolver);
+                        sb.AppendLine(";");
+                    }
+                });
+
+            sb.DecrementIndent();
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("public void Dispose()");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.AppendLine("if (_disposed) return;");
+        sb.AppendLine("_disposed = true;");
+        sb.AppendLine("_handle.DropResource(global::Wasmtime.StoreContext.FromStore(_store));");
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+        sb.AppendLine();
+    }
+
+    /// <summary>
+    /// Emits the parameter marshalling, native call, and result handling for an exported-resource
+    /// constructor or method. When <paramref name="selfHandle"/> is non-null it is passed as the
+    /// first (self) argument and is NOT disposed (it is retained by the wrapper).
+    /// </summary>
+    private static void WriteExportedResourceCall(IndentedStringBuilder sb, EquatableArray<WitFuncParameter> parameters,
+        EquatableArray<WitType> results, string? selfHandle, ITypeContainerResolver resolver, Action onResult)
+    {
+        var selfOffset = selfHandle != null ? 1 : 0;
+
+        // Initialize parameter wrappers (ignoreDispose: true — the finally is the single owner).
+        for (var i = 0; i < parameters.Length; i++)
+        {
+            parameters[i].Type.HostWriter.WriteParameterInitializer(sb, parameters[i].CSharpVariableName, resolver, ignoreDispose: true, externallyOwned: false);
+        }
+
+        var parameterSize = selfOffset + parameters.Sum(p => p.Type.HostWriter.GetParameterSize(resolver));
+
+        if (parameterSize > 0)
+        {
+            sb.Append("global::Wasmtime.ComponentValue* __params = stackalloc global::Wasmtime.ComponentValue[").Append(parameterSize).AppendLine("];");
+            if (selfHandle != null)
+            {
+                sb.Append("__params[0] = ").Append(selfHandle).AppendLine(";");
+            }
+
+            var index = selfOffset;
+            for (var i = 0; i < parameters.Length;)
+            {
+                var p = parameters[i];
+                p.Type.HostWriter.WriteParameterSetter(sb, "__params", p.CSharpVariableName, index, ignoreDispose: true, resolver, externallyOwned: false);
+                var size = p.Type.HostWriter.GetParameterSize(resolver);
+                index += size;
+                i += size;
+            }
+        }
+        else
+        {
+            sb.AppendLine("global::Wasmtime.ComponentValue* __params = null;");
+        }
+
+        sb.Append("try");
+        sb.AppendLine();
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        sb.Append("using global::Wasmtime.ComponentCallResults __result = _instance.Call(__fn, ")
+            .Append(results.Length).Append(", __params, ").Append(parameterSize).AppendLine(");");
+        onResult();
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+        sb.AppendLine("finally");
+        sb.AppendLine("{");
+        sb.IncrementIndent();
+        // Dispose parameter wrappers, but never the retained self handle at index 0.
+        sb.Append("for (int __i = ").Append(selfOffset).Append("; __i < ").Append(parameterSize).AppendLine("; __i++)");
+        sb.IncrementIndent();
+        sb.AppendLine("__params[__i].Dispose(_store);");
+        sb.DecrementIndent();
+        sb.DecrementIndent();
+        sb.AppendLine("}");
     }
 
     private static void WriteItems(IndentedStringBuilder sb, EquatableArray<WitTypeDef> valueItems, ITypeContainerResolver resolver, string? enclosingClassName = null)
