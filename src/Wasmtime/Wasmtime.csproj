@@ -153,7 +153,10 @@ The .NET embedding of Wasmtime enables .NET code to instantiate WebAssembly modu
     </ItemGroup>
   </Target>
 
-  <Target Name="CopyWasmtimeLibrary" BeforeTargets="BeforeBuild">
+  <!-- DependsOnTargets ensures the native lib is downloaded even when this project
+       is consumed as a single-TFM ProjectReference (the inner build skips the
+       outer DispatchToInnerBuilds that DownloadWasmtime normally hooks). -->
+  <Target Name="CopyWasmtimeLibrary" BeforeTargets="BeforeBuild" DependsOnTargets="DownloadWasmtime">
     <ItemGroup>
       <Content Condition="'%(Wasmtime.Copy)'=='true'" Include="$(BaseIntermediateOutputPath)$(ReleaseFileNameBase)-%(Wasmtime.Arch)-%(Wasmtime.OS)-c-api/lib/%(Wasmtime.LibraryFilename)">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
