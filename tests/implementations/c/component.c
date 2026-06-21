@@ -138,6 +138,29 @@ int32_t exports_test_use_static_merge(int32_t a, int32_t b) {
     return tests_component_host_counter_static_counter_merge(a, b);
 }
 
+// Exported resource: the component defines `accumulator`; the host drives it.
+struct exports_tests_component_accumulator_api_accumulator_t {
+    int32_t total;
+};
+
+exports_tests_component_accumulator_api_own_accumulator_t
+exports_tests_component_accumulator_api_constructor_accumulator(int32_t start) {
+    exports_tests_component_accumulator_api_accumulator_t *rep = malloc(sizeof(*rep));
+    rep->total = start;
+    return exports_tests_component_accumulator_api_accumulator_new(rep);
+}
+
+int32_t exports_tests_component_accumulator_api_method_accumulator_add(
+    exports_tests_component_accumulator_api_borrow_accumulator_t self, int32_t n) {
+    self->total += n;
+    return self->total;
+}
+
+void exports_tests_component_accumulator_api_accumulator_destructor(
+    exports_tests_component_accumulator_api_accumulator_t *rep) {
+    free(rep);
+}
+
 // Exercises an imported resource: construct a host counter, increment it, drop it.
 int32_t exports_test_use_counter(int32_t initial, int32_t by) {
     tests_component_host_counter_own_counter_t counter =

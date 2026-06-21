@@ -109,6 +109,14 @@ typedef struct {
   int32_t val;
 } test_option_s32_t;
 
+typedef struct exports_tests_component_accumulator_api_own_accumulator_t {
+  int32_t __handle;
+} exports_tests_component_accumulator_api_own_accumulator_t;
+
+typedef struct exports_tests_component_accumulator_api_accumulator_t exports_tests_component_accumulator_api_accumulator_t;
+
+typedef exports_tests_component_accumulator_api_accumulator_t* exports_tests_component_accumulator_api_borrow_accumulator_t;
+
 // Imported Functions from `tests:component/host-counter@0.1.0`
 extern tests_component_host_counter_own_counter_t tests_component_host_counter_constructor_counter(int32_t initial);
 extern int32_t tests_component_host_counter_method_counter_increment(tests_component_host_counter_borrow_counter_t self, int32_t by);
@@ -158,6 +166,10 @@ void exports_test_divide_variant(int32_t a, int32_t b, test_value_or_error_t *re
 void exports_test_variant_tag(test_value_or_error_t *v, test_string_t *ret);
 bool exports_test_maybe_double(int32_t *maybe_x, int32_t *ret);
 
+// Exported Functions from `tests:component/accumulator-api@0.1.0`
+exports_tests_component_accumulator_api_own_accumulator_t exports_tests_component_accumulator_api_constructor_accumulator(int32_t start);
+int32_t exports_tests_component_accumulator_api_method_accumulator_add(exports_tests_component_accumulator_api_borrow_accumulator_t self, int32_t n);
+
 // Helper Functions
 
 void tests_component_types_entity_free(tests_component_types_entity_t *ptr);
@@ -187,6 +199,12 @@ void test_list_permission_free(test_list_permission_t *ptr);
 void test_result_s32_string_free(test_result_s32_string_t *ptr);
 
 void test_option_s32_free(test_option_s32_t *ptr);
+
+extern void exports_tests_component_accumulator_api_accumulator_drop_own(exports_tests_component_accumulator_api_own_accumulator_t handle);
+
+extern exports_tests_component_accumulator_api_own_accumulator_t exports_tests_component_accumulator_api_accumulator_new(exports_tests_component_accumulator_api_accumulator_t *rep);
+extern exports_tests_component_accumulator_api_accumulator_t* exports_tests_component_accumulator_api_accumulator_rep(exports_tests_component_accumulator_api_own_accumulator_t handle);
+void exports_tests_component_accumulator_api_accumulator_destructor(exports_tests_component_accumulator_api_accumulator_t *rep);
 
 // Transfers ownership of `s` into the string `ret`
 void test_string_set(test_string_t *ret, const char*s);

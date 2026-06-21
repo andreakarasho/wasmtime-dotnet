@@ -39,6 +39,13 @@ interface host-counter {
     }
 }
 
+interface accumulator-api {
+    resource accumulator {
+        constructor(start: s32);
+        add: func(n: s32) -> s32;
+    }
+}
+
 world type-tests {
     use types.{point, status, permission, value-or-error};
 
@@ -97,4 +104,6 @@ world test {
     import host-counter;
     export use-counter: func(initial: s32, by: s32) -> s32;
     export use-static-merge: func(a: s32, b: s32) -> s32;
+
+    export accumulator-api;
 }

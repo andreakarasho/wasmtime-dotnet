@@ -320,6 +320,17 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
     }
 
     [Fact]
+    public void ExportedResource_Roundtrip()
+    {
+        using var state = fixture.CreateState();
+
+        // Component-defined resource, driven by the host via the generated wrapper.
+        using var acc = state.Exports.NewAccumulator(10);
+        Assert.Equal(15, acc.Add(5));
+        Assert.Equal(18, acc.Add(3));
+    }
+
+    [Fact]
     public void Resource_DropInvokesHostDispose()
     {
         // Regression guard: when the component drops the imported resource, wasmtime must invoke

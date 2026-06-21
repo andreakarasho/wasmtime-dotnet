@@ -190,6 +190,10 @@ void __wasm_export_exports_test_variant_tag_post_return(uint8_t * arg0) {
 }
 
 
+// Exported Functions from `tests:component/accumulator-api@0.1.0`
+
+
+
 // Canonical ABI intrinsics
 
 __attribute__((__weak__, __export_name__("cabi_realloc")))
@@ -311,6 +315,32 @@ void test_result_s32_string_free(test_result_s32_string_t *ptr) {
 void test_option_s32_free(test_option_s32_t *ptr) {
   if (ptr->is_some) {
   }
+}
+
+__attribute__((__import_module__("[export]tests:component/accumulator-api@0.1.0"), __import_name__("[resource-drop]accumulator")))
+extern void __wasm_import_exports_tests_component_accumulator_api_accumulator_drop(int32_t handle);
+
+void exports_tests_component_accumulator_api_accumulator_drop_own(exports_tests_component_accumulator_api_own_accumulator_t handle) {
+  __wasm_import_exports_tests_component_accumulator_api_accumulator_drop(handle.__handle);
+}
+
+__attribute__(( __import_module__("[export]tests:component/accumulator-api@0.1.0"), __import_name__("[resource-new]accumulator")))
+extern int32_t __wasm_import_exports_tests_component_accumulator_api_accumulator_new(int32_t);
+
+__attribute__((__import_module__("[export]tests:component/accumulator-api@0.1.0"), __import_name__("[resource-rep]accumulator")))
+extern int32_t __wasm_import_exports_tests_component_accumulator_api_accumulator_rep(int32_t);
+
+exports_tests_component_accumulator_api_own_accumulator_t exports_tests_component_accumulator_api_accumulator_new(exports_tests_component_accumulator_api_accumulator_t *rep) {
+  return (exports_tests_component_accumulator_api_own_accumulator_t) { __wasm_import_exports_tests_component_accumulator_api_accumulator_new((int32_t) rep) };
+}
+
+exports_tests_component_accumulator_api_accumulator_t* exports_tests_component_accumulator_api_accumulator_rep(exports_tests_component_accumulator_api_own_accumulator_t handle) {
+  return (exports_tests_component_accumulator_api_accumulator_t*) __wasm_import_exports_tests_component_accumulator_api_accumulator_rep(handle.__handle);
+}
+
+__attribute__((__export_name__("tests:component/accumulator-api@0.1.0#[dtor]accumulator")))
+void __wasm_export_exports_tests_component_accumulator_api_accumulator_dtor(exports_tests_component_accumulator_api_accumulator_t* arg) {
+  exports_tests_component_accumulator_api_accumulator_destructor(arg);
 }
 
 void test_string_set(test_string_t *ret, const char*s) {
@@ -745,6 +775,18 @@ uint8_t * __wasm_export_exports_test_maybe_double(int32_t arg, int32_t arg0) {
     *((int8_t*)(ptr + 0)) = 0;
   }
   return ptr;
+}
+
+__attribute__((__export_name__("tests:component/accumulator-api@0.1.0#[constructor]accumulator")))
+int32_t __wasm_export_exports_tests_component_accumulator_api_constructor_accumulator(int32_t arg) {
+  exports_tests_component_accumulator_api_own_accumulator_t ret = exports_tests_component_accumulator_api_constructor_accumulator(arg);
+  return (ret).__handle;
+}
+
+__attribute__((__export_name__("tests:component/accumulator-api@0.1.0#[method]accumulator.add")))
+int32_t __wasm_export_exports_tests_component_accumulator_api_method_accumulator_add(uint8_t * arg, int32_t arg0) {
+  int32_t ret = exports_tests_component_accumulator_api_method_accumulator_add(((exports_tests_component_accumulator_api_accumulator_t*) arg), arg0);
+  return ret;
 }
 
 // Ensure that the *_component_type.o object is linked in
