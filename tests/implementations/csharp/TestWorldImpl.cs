@@ -62,6 +62,20 @@ public sealed class TestWorldExportsImpl : ITestWorldExports
         return counter.Increment(by);
     }
 
+    // Calls the imported static method on the counter resource (no instance).
+    public static int UseStaticMerge(int a, int b) => IHostCounterImports.Counter.Merge(a, b);
+
+    // variant result.
+    public static ValueOrError DivideVariant(int a, int b)
+        => b == 0 ? ValueOrError.Error("division by zero") : ValueOrError.Value((a / b).ToString());
+
+    // variant param.
+    public static string VariantTag(ValueOrError v)
+        => v.Tag == ValueOrError.Tags.Value ? $"value:{v.AsValue}" : $"error:{v.AsError}";
+
+    // option in/out.
+    public static int? MaybeDouble(int? x) => x is null ? null : x * 2;
+
     public static void RegisterEntity(Entity e) => Entities[e.id] = e;
 
     public static void RegisterEntities(List<Entity> e)

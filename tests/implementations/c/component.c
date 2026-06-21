@@ -98,6 +98,46 @@ bool exports_test_safe_divide(int32_t a, int32_t b, int32_t *ret, test_string_t 
     return true;
 }
 
+// variant result: ok -> value("<a/b>"), error -> error("division by zero")
+void exports_test_divide_variant(int32_t a, int32_t b, test_value_or_error_t *ret) {
+    if (b == 0) {
+        ret->tag = TESTS_COMPONENT_TYPES_VALUE_OR_ERROR_ERROR;
+        test_string_dup(&ret->val.error, "division by zero");
+    } else {
+        ret->tag = TESTS_COMPONENT_TYPES_VALUE_OR_ERROR_VALUE;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", a / b);
+        test_string_dup(&ret->val.value, buf);
+    }
+}
+
+// variant param -> "value:STR" or "error:STR"
+void exports_test_variant_tag(test_value_or_error_t *v, test_string_t *ret) {
+    char buf[256];
+    int is_value = v->tag == TESTS_COMPONENT_TYPES_VALUE_OR_ERROR_VALUE;
+    test_string_t *payload = is_value ? &v->val.value : &v->val.error;
+    char *msg = malloc(payload->len + 1);
+    memcpy(msg, payload->ptr, payload->len);
+    msg[payload->len] = '\0';
+    snprintf(buf, sizeof(buf), "%s:%s", is_value ? "value" : "error", msg);
+    free(msg);
+    test_string_dup(ret, buf);
+}
+
+// option in/out: None -> None, Some(n) -> Some(2n)
+bool exports_test_maybe_double(int32_t *maybe_x, int32_t *ret) {
+    if (maybe_x == NULL) {
+        return false;
+    }
+    *ret = *maybe_x * 2;
+    return true;
+}
+
+// export calling the imported static method counter.merge
+int32_t exports_test_use_static_merge(int32_t a, int32_t b) {
+    return tests_component_host_counter_static_counter_merge(a, b);
+}
+
 // Exercises an imported resource: construct a host counter, increment it, drop it.
 int32_t exports_test_use_counter(int32_t initial, int32_t by) {
     tests_component_host_counter_own_counter_t counter =

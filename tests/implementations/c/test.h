@@ -37,6 +37,17 @@ typedef uint8_t tests_component_types_permission_t;
 #define TESTS_COMPONENT_TYPES_PERMISSION_WRITE (1 << 1)
 #define TESTS_COMPONENT_TYPES_PERMISSION_EXECUTE (1 << 2)
 
+typedef struct tests_component_types_value_or_error_t {
+  uint8_t tag;
+  union {
+    test_string_t     value;
+    test_string_t     error;
+  } val;
+} tests_component_types_value_or_error_t;
+
+#define TESTS_COMPONENT_TYPES_VALUE_OR_ERROR_VALUE 0
+#define TESTS_COMPONENT_TYPES_VALUE_OR_ERROR_ERROR 1
+
 typedef struct tests_component_host_counter_own_counter_t {
   int32_t __handle;
 } tests_component_host_counter_own_counter_t;
@@ -52,6 +63,8 @@ typedef tests_component_types_point_t test_point_t;
 typedef tests_component_types_status_t test_status_t;
 
 typedef tests_component_types_permission_t test_permission_t;
+
+typedef tests_component_types_value_or_error_t test_value_or_error_t;
 
 typedef struct {
   test_entity_t *ptr;
@@ -91,10 +104,16 @@ typedef struct {
   } val;
 } test_result_s32_string_t;
 
+typedef struct {
+  bool is_some;
+  int32_t val;
+} test_option_s32_t;
+
 // Imported Functions from `tests:component/host-counter@0.1.0`
 extern tests_component_host_counter_own_counter_t tests_component_host_counter_constructor_counter(int32_t initial);
 extern int32_t tests_component_host_counter_method_counter_increment(tests_component_host_counter_borrow_counter_t self, int32_t by);
 extern int32_t tests_component_host_counter_method_counter_value(tests_component_host_counter_borrow_counter_t self);
+extern int32_t tests_component_host_counter_static_counter_merge(int32_t a, int32_t b);
 
 // Imported Functions from `test`
 extern void test_callback(void);
@@ -116,6 +135,7 @@ void exports_test_combine_string(test_string_t *s1, test_string_t *s2, test_stri
 void exports_test_accept_string(test_string_t *s);
 void exports_test_return_string(uint32_t length, test_string_t *ret);
 int32_t exports_test_use_counter(int32_t initial, int32_t by);
+int32_t exports_test_use_static_merge(int32_t a, int32_t b);
 uint8_t exports_test_add_u8(uint8_t x, uint8_t y);
 int8_t exports_test_add_s8(int8_t x, int8_t y);
 uint16_t exports_test_add_u16(uint16_t x, uint16_t y);
@@ -134,16 +154,23 @@ void exports_test_return_status_list(test_list_status_t *statuses, test_list_sta
 test_permission_t exports_test_return_permission(test_permission_t permission);
 void exports_test_return_permission_list(test_list_permission_t *permissions, test_list_permission_t *ret);
 bool exports_test_safe_divide(int32_t a, int32_t b, int32_t *ret, test_string_t *err);
+void exports_test_divide_variant(int32_t a, int32_t b, test_value_or_error_t *ret);
+void exports_test_variant_tag(test_value_or_error_t *v, test_string_t *ret);
+bool exports_test_maybe_double(int32_t *maybe_x, int32_t *ret);
 
 // Helper Functions
 
 void tests_component_types_entity_free(tests_component_types_entity_t *ptr);
+
+void tests_component_types_value_or_error_free(tests_component_types_value_or_error_t *ptr);
 
 extern void tests_component_host_counter_counter_drop_own(tests_component_host_counter_own_counter_t handle);
 
 extern tests_component_host_counter_borrow_counter_t tests_component_host_counter_borrow_counter(tests_component_host_counter_own_counter_t handle);
 
 void test_entity_free(test_entity_t *ptr);
+
+void test_value_or_error_free(test_value_or_error_t *ptr);
 
 void test_list_entity_free(test_list_entity_t *ptr);
 
@@ -158,6 +185,8 @@ void test_list_status_free(test_list_status_t *ptr);
 void test_list_permission_free(test_list_permission_t *ptr);
 
 void test_result_s32_string_free(test_result_s32_string_t *ptr);
+
+void test_option_s32_free(test_option_s32_t *ptr);
 
 // Transfers ownership of `s` into the string `ret`
 void test_string_set(test_string_t *ret, const char*s);

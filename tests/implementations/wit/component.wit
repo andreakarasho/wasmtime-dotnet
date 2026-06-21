@@ -23,6 +23,11 @@ interface types {
         write,
         execute
     }
+
+    variant value-or-error {
+        value(string),
+        error(string),
+    }
 }
 
 interface host-counter {
@@ -30,11 +35,12 @@ interface host-counter {
         constructor(initial: s32);
         increment: func(by: s32) -> s32;
         value: func() -> s32;
+        merge: static func(a: s32, b: s32) -> s32;
     }
 }
 
 world type-tests {
-    use types.{point, status, permission};
+    use types.{point, status, permission, value-or-error};
 
     export add-u8: func(x: u8, y: u8) -> u8;
     export add-s8: func(x: s8, y: s8) -> s8;
@@ -55,6 +61,10 @@ world type-tests {
     export return-permission-list: func(permissions: list<permission>) -> list<permission>;
 
     export safe-divide: func(a: s32, b: s32) -> result<s32, string>;
+
+    export divide-variant: func(a: s32, b: s32) -> value-or-error;
+    export variant-tag: func(v: value-or-error) -> string;
+    export maybe-double: func(x: option<s32>) -> option<s32>;
 }
 
 world test {
@@ -86,4 +96,5 @@ world test {
 
     import host-counter;
     export use-counter: func(initial: s32, by: s32) -> s32;
+    export use-static-merge: func(a: s32, b: s32) -> s32;
 }

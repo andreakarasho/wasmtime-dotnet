@@ -280,6 +280,46 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
     }
 
     [Fact]
+    public void Variant_Result()
+    {
+        using var state = fixture.CreateState();
+
+        var ok = state.Exports.DivideVariant(10, 2);
+        Assert.Equal(ValueOrError.Case.Value, ok.Discriminant);
+        Assert.Equal("5", ok.ValuePayload);
+
+        var err = state.Exports.DivideVariant(10, 0);
+        Assert.Equal(ValueOrError.Case.Error, err.Discriminant);
+        Assert.Equal("division by zero", err.ErrorPayload);
+    }
+
+    [Fact]
+    public void Variant_Param()
+    {
+        using var state = fixture.CreateState();
+
+        Assert.Equal("value:42", state.Exports.VariantTag(ValueOrError.CreateValue("42")));
+        Assert.Equal("error:boom", state.Exports.VariantTag(ValueOrError.CreateError("boom")));
+    }
+
+    [Fact]
+    public void Option_Roundtrip()
+    {
+        using var state = fixture.CreateState();
+
+        Assert.Equal(10, state.Exports.MaybeDouble(5));
+        Assert.Null(state.Exports.MaybeDouble(null));
+    }
+
+    [Fact]
+    public void Resource_StaticMethod()
+    {
+        using var state = fixture.CreateState();
+
+        Assert.Equal(7, state.Exports.UseStaticMerge(3, 4));
+    }
+
+    [Fact]
     public void Resource_DropInvokesHostDispose()
     {
         // Regression guard: when the component drops the imported resource, wasmtime must invoke

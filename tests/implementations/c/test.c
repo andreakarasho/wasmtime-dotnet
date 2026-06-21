@@ -14,6 +14,9 @@ extern int32_t __wasm_import_tests_component_host_counter_method_counter_increme
 __attribute__((__import_module__("tests:component/host-counter@0.1.0"), __import_name__("[method]counter.value")))
 extern int32_t __wasm_import_tests_component_host_counter_method_counter_value(int32_t);
 
+__attribute__((__import_module__("tests:component/host-counter@0.1.0"), __import_name__("[static]counter.merge")))
+extern int32_t __wasm_import_tests_component_host_counter_static_counter_merge(int32_t, int32_t);
+
 // Imported Functions from `test`
 
 __attribute__((__import_module__("$root"), __import_name__("callback")))
@@ -97,6 +100,7 @@ void __wasm_export_exports_test_return_string_post_return(uint8_t * arg0) {
 
 
 
+
 __attribute__((__weak__, __export_name__("cabi_post_uppercase")))
 void __wasm_export_exports_test_uppercase_post_return(uint8_t * arg0) {
   if ((*((size_t*) (arg0 + sizeof(void*)))) > 0) {
@@ -160,6 +164,32 @@ void __wasm_export_exports_test_safe_divide_post_return(uint8_t * arg0) {
   }
 }
 
+__attribute__((__weak__, __export_name__("cabi_post_divide-variant")))
+void __wasm_export_exports_test_divide_variant_post_return(uint8_t * arg0) {
+  switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
+    case 0: {
+      if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
+        free(*((uint8_t **) (arg0 + sizeof(void*))));
+      }
+      break;
+    }
+    case 1: {
+      if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
+        free(*((uint8_t **) (arg0 + sizeof(void*))));
+      }
+      break;
+    }
+  }
+}
+
+__attribute__((__weak__, __export_name__("cabi_post_variant-tag")))
+void __wasm_export_exports_test_variant_tag_post_return(uint8_t * arg0) {
+  if ((*((size_t*) (arg0 + sizeof(void*)))) > 0) {
+    free(*((uint8_t **) (arg0 + 0)));
+  }
+}
+
+
 // Canonical ABI intrinsics
 
 __attribute__((__weak__, __export_name__("cabi_realloc")))
@@ -177,6 +207,19 @@ void tests_component_types_entity_free(tests_component_types_entity_t *ptr) {
   test_string_free(&ptr->name);
 }
 
+void tests_component_types_value_or_error_free(tests_component_types_value_or_error_t *ptr) {
+  switch ((int32_t) ptr->tag) {
+    case 0: {
+      test_string_free(&ptr->val.value);
+      break;
+    }
+    case 1: {
+      test_string_free(&ptr->val.error);
+      break;
+    }
+  }
+}
+
 __attribute__((__import_module__("tests:component/host-counter@0.1.0"), __import_name__("[resource-drop]counter")))
 extern void __wasm_import_tests_component_host_counter_counter_drop(int32_t handle);
 
@@ -190,6 +233,10 @@ tests_component_host_counter_borrow_counter_t tests_component_host_counter_borro
 
 void test_entity_free(test_entity_t *ptr) {
   tests_component_types_entity_free(ptr);
+}
+
+void test_value_or_error_free(test_value_or_error_t *ptr) {
+  tests_component_types_value_or_error_free(ptr);
 }
 
 void test_list_entity_free(test_list_entity_t *ptr) {
@@ -261,6 +308,11 @@ void test_result_s32_string_free(test_result_s32_string_t *ptr) {
   }
 }
 
+void test_option_s32_free(test_option_s32_t *ptr) {
+  if (ptr->is_some) {
+  }
+}
+
 void test_string_set(test_string_t *ret, const char*s) {
   ret->ptr = (uint8_t*) s;
   ret->len = strlen(s);
@@ -297,6 +349,11 @@ int32_t tests_component_host_counter_method_counter_increment(tests_component_ho
 
 int32_t tests_component_host_counter_method_counter_value(tests_component_host_counter_borrow_counter_t self) {
   int32_t ret = __wasm_import_tests_component_host_counter_method_counter_value((self).__handle);
+  return ret;
+}
+
+int32_t tests_component_host_counter_static_counter_merge(int32_t a, int32_t b) {
+  int32_t ret = __wasm_import_tests_component_host_counter_static_counter_merge(a, b);
   return ret;
 }
 
@@ -445,6 +502,12 @@ uint8_t * __wasm_export_exports_test_return_string(int32_t arg) {
 __attribute__((__export_name__("use-counter")))
 int32_t __wasm_export_exports_test_use_counter(int32_t arg, int32_t arg0) {
   int32_t ret = exports_test_use_counter(arg, arg0);
+  return ret;
+}
+
+__attribute__((__export_name__("use-static-merge")))
+int32_t __wasm_export_exports_test_use_static_merge(int32_t arg, int32_t arg0) {
+  int32_t ret = exports_test_use_static_merge(arg, arg0);
   return ret;
 }
 
@@ -602,6 +665,84 @@ uint8_t * __wasm_export_exports_test_safe_divide(int32_t arg, int32_t arg0) {
   } else {
     const int32_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
     *((int32_t*)(ptr + sizeof(void*))) = *payload;
+  }
+  return ptr;
+}
+
+__attribute__((__export_name__("divide-variant")))
+uint8_t * __wasm_export_exports_test_divide_variant(int32_t arg, int32_t arg0) {
+  test_value_or_error_t ret;
+  exports_test_divide_variant(arg, arg0, &ret);
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  switch ((int32_t) (ret).tag) {
+    case 0: {
+      const test_string_t *payload = &(ret).val.value;
+      *((int8_t*)(ptr + 0)) = 0;
+      *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload).len;
+      *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload).ptr;
+      break;
+    }
+    case 1: {
+      const test_string_t *payload1 = &(ret).val.error;
+      *((int8_t*)(ptr + 0)) = 1;
+      *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload1).len;
+      *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload1).ptr;
+      break;
+    }
+  }
+  return ptr;
+}
+
+__attribute__((__export_name__("variant-tag")))
+uint8_t * __wasm_export_exports_test_variant_tag(int32_t arg, uint8_t * arg0, size_t arg1) {
+  tests_component_types_value_or_error_t variant;
+  variant.tag = arg;
+  switch ((int32_t) variant.tag) {
+    case 0: {
+      variant.val.value = (test_string_t) { (uint8_t*)(arg0), (arg1) };
+      break;
+    }
+    case 1: {
+      variant.val.error = (test_string_t) { (uint8_t*)(arg0), (arg1) };
+      break;
+    }
+  }
+  test_value_or_error_t arg2 = variant;
+  test_string_t ret;
+  exports_test_variant_tag(&arg2, &ret);
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  *((size_t*)(ptr + sizeof(void*))) = (ret).len;
+  *((uint8_t **)(ptr + 0)) = (uint8_t *) (ret).ptr;
+  return ptr;
+}
+
+__attribute__((__export_name__("maybe-double")))
+uint8_t * __wasm_export_exports_test_maybe_double(int32_t arg, int32_t arg0) {
+  test_option_s32_t option;
+  switch (arg) {
+    case 0: {
+      option.is_some = false;
+      break;
+    }
+    case 1: {
+      option.is_some = true;
+      option.val = arg0;
+      break;
+    }
+  }
+  int32_t val;
+  bool ret = exports_test_maybe_double(option.is_some ? &(option.val) : NULL, &val);
+
+  test_option_s32_t ret1;
+  ret1.is_some = ret;
+  ret1.val = val;
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  if ((ret1).is_some) {
+    const int32_t *payload2 = &(ret1).val;
+    *((int8_t*)(ptr + 0)) = 1;
+    *((int32_t*)(ptr + 4)) = *payload2;
+  } else {
+    *((int8_t*)(ptr + 0)) = 0;
   }
   return ptr;
 }
