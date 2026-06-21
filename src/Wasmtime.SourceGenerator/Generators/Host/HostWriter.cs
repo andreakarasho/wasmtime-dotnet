@@ -217,7 +217,10 @@ public static class HostWriter
                 var rootResourceDefs = CollectRootResourceDefs(imports, projectResolver);
                 foreach (var (resourceName, typeId) in rootResourceDefs)
                 {
-                    sb.Append("linker.DefineResource(\"").Append(resourceName).Append("\", ").Append(typeId).AppendLine(");");
+                    // Register the drop as the resource destructor — wasmtime invokes this when the
+                    // component drops a handle. (The [resource-drop] import is never called.)
+                    sb.Append("linker.DefineResource(\"").Append(resourceName).Append("\", ").Append(typeId)
+                        .Append(", Drop").Append(StringUtils.GetName(resourceName)).AppendLine(");");
                 }
 
                 // Root-level imports (instancePath == null)
@@ -248,7 +251,10 @@ public static class HostWriter
                     {
                         foreach (var res in resources)
                         {
-                            sb.Append(instanceVarName).Append(".DefineResource(\"").Append(res.ResourceName).Append("\", ").Append(res.TypeId).AppendLine(");");
+                            // Register the drop as the resource destructor — wasmtime invokes this
+                            // when the component drops a handle. ([resource-drop] is never called.)
+                            sb.Append(instanceVarName).Append(".DefineResource(\"").Append(res.ResourceName).Append("\", ").Append(res.TypeId)
+                                .Append(", Drop").Append(StringUtils.GetName(res.ResourceName)).AppendLine(");");
                         }
                     }
 
@@ -601,13 +607,8 @@ public static class HostWriter
                 }
             }
 
-            // Drop: [resource-drop]system
-            var dropFunc = new WitFuncType(
-                new EquatableArray<WitFuncParameter>(new WitFuncParameter[] { new WitFuncParameter("self", resType) }),
-                new EquatableArray<WitType>(Array.Empty<WitType>())
-            );
-            var dropAbiName = $"[resource-drop]{resName}";
-            imports.Add((dropAbiName, interfacePath, dropFunc));
+            // Drop is handled by the resource destructor registered via DefineResource
+            // (wasmtime's intrinsic resource.drop calls it); no [resource-drop] import is needed.
         }
     }
 

@@ -30,6 +30,8 @@ internal class TestImportsImpl : Wit.Tests.Component.TestImports
     // Imported resource: host provides the `counter` implementation the component constructs/uses.
     public override Counter NewCounter(int initial) => new CounterImpl(initial);
 
+    internal static int CounterDisposeCount;
+
     private sealed class CounterImpl : Counter
     {
         private int _value;
@@ -46,6 +48,7 @@ internal class TestImportsImpl : Wit.Tests.Component.TestImports
 
         public override void Dispose()
         {
+            System.Threading.Interlocked.Increment(ref CounterDisposeCount);
         }
     }
 }

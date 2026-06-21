@@ -278,4 +278,18 @@ public class ComponentCallTypeTest(ComponentFixture fixture)
         // Component constructs a host-provided counter(5), increments by 3, drops it.
         Assert.Equal(8, state.Exports.UseCounter(5, 3));
     }
+
+    [Fact]
+    public void Resource_DropInvokesHostDispose()
+    {
+        // Regression guard: when the component drops the imported resource, wasmtime must invoke
+        // the host destructor (registered via DefineResource) so the handle table is cleaned and
+        // the host object disposed. Previously the drop never fired (handle-table leak).
+        TestImportsImpl.CounterDisposeCount = 0;
+        using (var state = fixture.CreateState())
+        {
+            state.Exports.UseCounter(5, 3);
+        }
+        Assert.Equal(1, TestImportsImpl.CounterDisposeCount);
+    }
 }
