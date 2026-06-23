@@ -1017,4 +1017,24 @@ public struct ComponentValue : IDisposable
         result->_val.kind = 13; // WASMTIME_COMPONENT_LIST
         result->_val.of.list = list;
     }
+
+    /// <summary>
+    /// Extracts a list of homogeneous blittable primitives (list&lt;u8&gt;, list&lt;f32&gt;, …) into
+    /// <paramref name="dst"/> in one strided pass over the native value array. Read-direction mirror
+    /// of <see cref="CreateListOfBlittableRecords{T}"/>: avoids the per-element managed ListBuilder
+    /// indexer (each access copies a tagged-union ComponentValue by value) plus the per-element kind
+    /// check. The element kind is guaranteed by the WIT list type, so it is trusted here. All scalar
+    /// kinds live at union offset 0, so the reinterpret reads the same field as ToByte/ToInt32/etc.
+    /// </summary>
+    /// <typeparam name="T">The primitive type (byte, ushort, int, float, …).</typeparam>
+    /// <param name="list">The native list to read from (not consumed; wasmtime owns it).</param>
+    /// <param name="dst">Destination span, sized to <paramref name="list"/>.Length by the caller.</param>
+    public static unsafe void ReadListOfPrimitives<T>(in ListBuilder list, Span<T> dst)
+        where T : unmanaged
+    {
+        var src = (ComponentValue*)list.Value.data;
+        var n = list.Length;
+        for (var i = 0; i < n; i++)
+            dst[i] = *(T*)&src[i]._val.of;
+    }
 }

@@ -304,17 +304,25 @@ public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.Li
 
         var indexName = $"{parameterName}_i";
 
-        // Result is exposed as ReadOnlySpan<T> over a heap array. Pooled/stackalloc storage
-        // must NOT be used here: the span is returned to (or retained by) the caller, so a
-        // span over method-local memory would dangle once this method returns.
+        // A borrowed host-import parameter (generator convention: read into "args") is consumed
+        // synchronously by the user method and freed in WriteResultCleanup right after, so a
+        // blittable-primitive list can use stackalloc (small) / ArrayPool (large) — no heap alloc.
+        // An escaping guest-export result ("result"/"__result", no cleanup) MUST stay over a heap
+        // array: the span is returned to / retained by the caller and would dangle otherwise.
+        var borrowedParam = paramName == "args";
         sb.AppendLine("// Convert list builder to array");
-        WriteToArray(sb, resolver, parameterName, builderName, indexName, usePooledSpan: false, usePooledArray: false);
+        WriteToArray(sb, resolver, parameterName, builderName, indexName,
+            usePooledSpan: borrowedParam && IsBlittablePrimitive, usePooledArray: false);
     }
 
     /// <inheritdoc />
     public override void WriteResultCleanup(IndentedStringBuilder sb, string paramName, int index, ITypeContainerResolver resolver)
     {
-        // Heap-backed result array (see WriteResultGetterInitializer) — nothing to return to a pool.
+        // Mirror of WriteResultGetterInitializer: a borrowed primitive-list param may have rented
+        // from ArrayPool (lists over the stackalloc threshold) — return it now that the user method
+        // has consumed the span. stackalloc'd small lists have a null _rented and need no return.
+        if (paramName == "args" && IsBlittablePrimitive)
+            WritePooledReturn(sb, resolver, $"{paramName}_{index}");
     }
 
     /// <inheritdoc />
@@ -395,6 +403,17 @@ public class ListHostWriter(WitType ElementType) : TypeHostWriter(WitTypeKind.Li
             sb.Append("[] ").Append(parameterName).Append(" = new ");
             ElementType.HostWriter.WriteCSharpType(sb, resolver);
             sb.Append("[").Append(countName).AppendLine("];");
+        }
+
+        if (IsBlittablePrimitive)
+        {
+            // Batch fast path: stride the native value array once instead of N managed
+            // ListBuilder indexer reads (each copies a tagged-union ComponentValue by value)
+            // plus a per-element kind check. dst is T[] (heap) or Span<T> (pooled/stackalloc).
+            sb.Append("global::Wasmtime.ComponentValue.ReadListOfPrimitives<");
+            ElementType.HostWriter.WriteCSharpType(sb, resolver);
+            sb.Append(">(").Append(builderName).Append(", ").Append(parameterName).AppendLine(");");
+            return;
         }
 
         sb.Append("for (int ").Append(indexName).Append(" = 0; ").Append(indexName).Append(" < ").Append(countName).Append("; ").Append(indexName).AppendLine("++)");
