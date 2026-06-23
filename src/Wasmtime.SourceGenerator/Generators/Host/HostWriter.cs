@@ -1283,10 +1283,36 @@ public static class HostWriter
             sb.Append(' ').Append(field.CSharpName).AppendLine(";");
         }
 
+        // ToRecordBuilder / FromRecordBuilder emit `&Helper.ToByteVector` function
+        // pointers for any enum/flags field (incl. one reached through a list/option
+        // or a named-type alias), which need an unsafe context. Dry-run the bodies
+        // into a scratch buffer to see whether a pointer is actually emitted, then
+        // mark the methods unsafe only when needed — a blanket `unsafe` would force
+        // AllowUnsafeBlocks onto enum-free consumers that don't otherwise need it.
+        var scratch = new IndentedStringBuilder();
+        WriteToRecordBuilderBody(scratch, record, resolver);
+        WriteFromRecordBuilderBody(scratch, record, resolver);
+        var unsafePrefix = scratch.ToString().Contains('&') ? "unsafe " : "";
+
         // ToRecordBuilder
         sb.AppendLine();
-        sb.Append("public global::Wasmtime.RecordBuilder ToRecordBuilder(bool copyConstants)");
+        sb.Append("public ").Append(unsafePrefix).Append("global::Wasmtime.RecordBuilder ToRecordBuilder(bool copyConstants)");
         sb.AppendLine();
+        WriteToRecordBuilderBody(sb, record, resolver);
+
+        // FromRecordBuilder — index-based access (O(N)) instead of name-matching
+        // (O(N^2)) since the native record builder preserves field order matching
+        // the WIT definition.
+        sb.AppendLine();
+        sb.Append("public static ").Append(unsafePrefix).Append(record.CSharpName).AppendLine(" FromRecordBuilder(global::Wasmtime.RecordBuilder builder)");
+        WriteFromRecordBuilderBody(sb, record, resolver);
+
+        sb.DecrementIndent();
+        sb.AppendLine("}");
+    }
+
+    private static void WriteToRecordBuilderBody(IndentedStringBuilder sb, WitRecord record, ITypeContainerResolver resolver)
+    {
         sb.AppendLine("{");
         sb.IncrementIndent();
         sb.Append("var builder = new global::Wasmtime.RecordBuilder(").Append(record.Fields.Length).AppendLine(", disposeNames: false);");
@@ -1328,11 +1354,10 @@ public static class HostWriter
         sb.AppendLine("return builder;");
         sb.DecrementIndent();
         sb.AppendLine("}");
+    }
 
-        // Create — uses index-based access (O(N)) instead of name-matching (O(N^2))
-        // since the native record builder preserves field order matching the WIT definition.
-        sb.AppendLine();
-        sb.Append("public static ").Append(record.CSharpName).AppendLine(" FromRecordBuilder(global::Wasmtime.RecordBuilder builder)");
+    private static void WriteFromRecordBuilderBody(IndentedStringBuilder sb, WitRecord record, ITypeContainerResolver resolver)
+    {
         sb.AppendLine("{");
         sb.IncrementIndent();
         sb.Append(record.CSharpName).Append(" result = new ").Append(record.CSharpName).AppendLine("();");
@@ -1352,9 +1377,6 @@ public static class HostWriter
 
         sb.AppendLine();
         sb.AppendLine("return result;");
-
-        sb.DecrementIndent();
-        sb.AppendLine("}");
 
         sb.DecrementIndent();
         sb.AppendLine("}");
