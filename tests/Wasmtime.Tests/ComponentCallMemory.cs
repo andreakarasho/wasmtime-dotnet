@@ -46,4 +46,36 @@ public class ComponentCallMemory(ComponentFixture fixture, ITestOutputHelper out
             }
         }
     }
+
+    // Guards against the host-side leak of composite return values: wasmtime lowers returned
+    // strings/lists/records/... into the embedder-owned results array and post_return does NOT
+    // free those host copies — only wasmtime_component_val_delete does. Measures HOST private
+    // bytes (not guest wasm memory, which the test above covers). The returned managed string is
+    // discarded each iteration so GC keeps the managed side flat; only a native leak shows.
+    [Fact]
+    public void Guest_To_Host_DoesNotLeakHostMemory()
+    {
+        using var state = fixture.CreateState();
+
+        const int sz = 10 * 1024 * 1024; // 10 MB per returned string
+        const int iters = 300;           // ~3000 MB leaked if returned vals are never freed
+
+        for (var i = 0; i < 5; i++) state.Exports.ReturnString(sz); // warmup
+
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        var proc = System.Diagnostics.Process.GetCurrentProcess();
+        proc.Refresh();
+        long before = proc.PrivateMemorySize64;
+
+        for (var i = 0; i < iters; i++) state.Exports.ReturnString(sz);
+
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        proc.Refresh();
+        long after = proc.PrivateMemorySize64;
+
+        long deltaMb = (after - before) / (1024 * 1024);
+        output.WriteLine($"Private bytes before={before / 1048576}MB after={after / 1048576}MB delta={deltaMb}MB (full leak would be ~{(long)iters * sz / 1048576}MB)");
+
+        Assert.True(deltaMb < 500, $"Host private bytes grew {deltaMb}MB across {iters} composite-returning calls — returned values are leaking.");
+    }
 }

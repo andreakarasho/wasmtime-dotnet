@@ -804,6 +804,31 @@ public struct ComponentValue : IDisposable
     private static void ThrowInvalidKind(byte kind, string target)
         => throw new InvalidOperationException($"Cannot convert ComponentValue of kind {kind} to {target}.");
 
+    /// <summary>
+    /// Releases the native contents of a value that wasmtime wrote into an embedder-owned result
+    /// slot, via <c>wasmtime_component_val_delete</c> (frees the owned Vec/String/Box by kind).
+    /// <para>
+    /// <c>post_return</c> only reclaims guest-side <c>cabi_realloc</c> buffers; the host-side copy
+    /// wasmtime lowers into the results array is embedder-owned and leaks unless deleted here.
+    /// </para>
+    /// <para>
+    /// No-op for resource handles (kind 21): an owned resource returned from an export is retained
+    /// by its generated wrapper class and dropped there, and borrowed resources are released by
+    /// <see cref="ComponentBorrowTracker"/> — deleting them here would double-free.
+    /// </para>
+    /// </summary>
+    internal unsafe void FreeReturned()
+    {
+        if (_val.kind == 21) return;
+
+        fixed (wasmtime_component_val* p = &_val)
+        {
+            wasmtime_component_val_delete(p);
+        }
+
+        _val = default;
+    }
+
     /// <inheritdoc />
     public unsafe void Dispose()
     {
