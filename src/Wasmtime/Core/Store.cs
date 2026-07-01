@@ -23,13 +23,36 @@ public sealed unsafe class Store : IDisposable
 
     internal bool IsWasiP2Added => _wasiP2Config != null;
 
-    public void AddWasiP2(bool inheritStdin = false, bool inheritStdout = false, bool inheritStderr = false)
+    public void AddWasiP2(bool inheritStdin = false, bool inheritStdout = false, bool inheritStderr = false,
+                          (string HostPath, string GuestPath)[]? preopenDirs = null,
+                          (string HostPath, string GuestPath)[]? writableDirs = null)
     {
         var cfg = wasi_config_new();
 
         if (inheritStdin) wasi_config_inherit_stdin(cfg);
         if (inheritStdout) wasi_config_inherit_stdout(cfg);
         if (inheritStderr) wasi_config_inherit_stderr(cfg);
+
+        // WASI defaults to an empty argv; the .NET wasi startup needs argv[0].
+        wasi_config_set_argv(cfg, 1, new[] { "guest" });
+
+        // Dir + file perms bitmask: READ=1, WRITE=2.
+        const nuint read = 1, readWrite = 3;
+
+        if (preopenDirs != null)
+        {
+            // Read-only grant — e.g. the UO data dir (the guest only reads asset files).
+            foreach (var (host, guest) in preopenDirs)
+                wasi_config_preopen_dir(cfg, host, guest, read, read);
+        }
+
+        if (writableDirs != null)
+        {
+            // Read+write grant — e.g. the guest's config dir (settings/profile/gumps
+            // persistence). Scope this to a dedicated dir, never the whole filesystem.
+            foreach (var (host, guest) in writableDirs)
+                wasi_config_preopen_dir(cfg, host, guest, readWrite, readWrite);
+        }
 
         wasmtime_context_set_wasi(Context, cfg);
 
