@@ -73,6 +73,15 @@ internal unsafe class ComponentCallResultsInternal : IDisposable
             wasmtime_component_func_post_return(ptr, _context);
         }
 
+        // Free the host-side copies wasmtime lowered into the embedder-owned results array.
+        // post_return (above) only reclaims guest buffers, so without this every composite return
+        // (string/list/record/tuple/variant/flags/option/result) leaks. Resource handles are
+        // skipped inside FreeReturned (retained by wrappers / released by the borrow tracker).
+        for (var i = 0; i < Length; i++)
+        {
+            Array[i].FreeReturned();
+        }
+
         System.Array.Clear(Array, 0, Length);
 
         _instance = null;
