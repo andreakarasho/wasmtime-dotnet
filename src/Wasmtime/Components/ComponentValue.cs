@@ -449,6 +449,18 @@ public struct ComponentValue : IDisposable
         return new ByteVector(_val.of.@string).GetString();
     }
 
+    /// <summary>
+    /// Borrows the raw canonical-ABI UTF-8 bytes of a string value without materializing a
+    /// managed string. The span aliases native memory owned by wasmtime: it is valid only
+    /// while the underlying value is alive — inside a host import callback that means the
+    /// duration of the call, so consume it synchronously.
+    /// </summary>
+    public readonly unsafe ReadOnlySpan<byte> ToUtf8Span()
+    {
+        if (_val.kind != 12) ThrowInvalidKind(_val.kind, "String");
+        return new ReadOnlySpan<byte>(_val.of.@string.data, (int)_val.of.@string.size);
+    }
+
     public readonly ListBuilder ToListBuilder()
     {
         if (_val.kind != 13) ThrowInvalidKind(_val.kind, "List");

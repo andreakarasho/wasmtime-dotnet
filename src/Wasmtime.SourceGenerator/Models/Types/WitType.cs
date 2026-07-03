@@ -25,3 +25,13 @@ public record WitType(WitTypeKind Kind)
 
     public virtual TypeHostWriter HostWriter => new(Kind);
 }
+
+/// <summary>
+/// A WIT <c>string</c> that surfaces host-side as <c>ReadOnlySpan&lt;byte&gt;</c> over the raw
+/// canonical-ABI UTF-8 bytes (no per-call string alloc). Substituted for parameters whose WIT
+/// name ends in <c>-utf8</c> — see <see cref="WitFuncParameter"/>.
+/// </summary>
+public record WitUtf8StringType() : WitType(WitTypeKind.String)
+{
+    public override TypeHostWriter HostWriter => new Utf8SpanHostWriter();
+}
