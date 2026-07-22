@@ -11,7 +11,13 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <AssemblyName>Wasmtime.Dotnet</AssemblyName>
+    <!-- Distinct assembly simple-name so this fork can load side-by-side with the
+         upstream `Wasmtime` NuGet, whose assembly is ALSO `Wasmtime.Dotnet` in the
+         same namespace `Wasmtime`. The default ALC binds non-strong-named assemblies
+         by simple name (first-loaded wins), so an identical name makes in-process
+         coexistence impossible regardless of extern aliases. Namespace stays
+         `Wasmtime` so no fork/consumer source changes. -->
+    <AssemblyName>WasmtimeCm.Dotnet</AssemblyName>
     <PackageId>$(WasmtimePackagePrefix)</PackageId>
     <Version>$(WasmtimePackageVersion)</Version>
     <Authors>Gerard Smit, Peter Huene</Authors>
@@ -156,11 +162,15 @@ The .NET embedding of Wasmtime enables .NET code to instantiate WebAssembly modu
   <!-- DependsOnTargets ensures the native lib is downloaded even when this project
        is consumed as a single-TFM ProjectReference (the inner build skips the
        outer DispatchToInnerBuilds that DownloadWasmtime normally hooks). -->
+  <!-- Deploy the native under a `-cm` (component-model) name so this fork's native
+       does not clash with the upstream `Wasmtime` NuGet's `wasmtime.dll` when both
+       run in one process. The DllImport("wasmtime") sites are redirected to this
+       renamed file by NativeLibraryResolver.cs. -->
   <Target Name="CopyWasmtimeLibrary" BeforeTargets="BeforeBuild" DependsOnTargets="DownloadWasmtime">
     <ItemGroup>
       <Content Condition="'%(Wasmtime.Copy)'=='true'" Include="$(BaseIntermediateOutputPath)$(ReleaseFileNameBase)-%(Wasmtime.Arch)-%(Wasmtime.OS)-c-api/lib/%(Wasmtime.LibraryFilename)">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        <Link>%(Wasmtime.LibraryFilename)</Link>
+        <Link>$([System.String]::Copy('%(Wasmtime.LibraryFilename)').Replace('wasmtime', 'wasmtime-cm'))</Link>
       </Content>
     </ItemGroup>
   </Target>
