@@ -16,25 +16,17 @@ internal record struct ComponentFunction(
 
 internal unsafe class ComponentExport
 {
-    /// <summary>
-    /// Maximum number of functions that can be registered.
-    /// </summary>
-    private const int MaxFunctions = 1024;
-
     public static readonly delegate* unmanaged[Cdecl] <void*, wasmtime_context*, void*, wasmtime_component_val*, nuint, wasmtime_component_val*, nuint, wasmtime_error*> CallerPtr = &Caller;
 
     /// <summary>
-    /// Pre-allocated array for O(1) function lookup. Registration is write-once (during linker setup),
-    /// reads happen on every host import call. Volatile.Read/Write ensures visibility across threads.
+    /// O(1) function lookup by id (the id is the native callback's data pointer). Registration
+    /// (linker setup) appends under a lock and grows the array by replacing it; reads happen
+    /// on every host import call. Registrations are never removed, so a process that builds
+    /// many linkers (e.g. a test suite) keeps growing it — hence no fixed cap.
     /// </summary>
-    private static readonly ComponentFunction[] RegisteredFunctions = new ComponentFunction[MaxFunctions];
+    private static ComponentFunction[] RegisteredFunctions = new ComponentFunction[256];
     private static int FunctionId;
-    private static nint StaticFunctionIds;
-
-    static ComponentExport()
-    {
-        StaticFunctionIds = Marshal.AllocHGlobal(MaxFunctions);
-    }
+    private static readonly object RegisterGate = new();
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static wasmtime_error* Caller(
@@ -51,10 +43,11 @@ internal unsafe class ComponentExport
 
         string? errorMessage = null;
 
-        var id = (int)((nint)data - StaticFunctionIds);
-        if (id > 0 && id < MaxFunctions)
+        var functions = Volatile.Read(ref RegisteredFunctions);
+        var id = (nint)data;
+        if (id > 0 && id < functions.Length)
         {
-            ref var function = ref RegisteredFunctions[id];
+            ref var function = ref functions[id];
             if (function.Function != null)
             {
                 try
@@ -97,15 +90,19 @@ internal unsafe class ComponentExport
 
     public static nint RegisterFunction(ComponentFunctionDelegate function, object? state = null)
     {
-        var id = Interlocked.Increment(ref FunctionId);
-
-        if (id >= MaxFunctions)
+        lock (RegisterGate)
         {
-            throw new InvalidOperationException("Maximum number of functions reached.");
+            var id = ++FunctionId;
+            var functions = RegisteredFunctions;
+            if (id >= functions.Length)
+            {
+                var grown = new ComponentFunction[functions.Length * 2];
+                Array.Copy(functions, grown, functions.Length);
+                functions = grown;
+            }
+            functions[id] = new ComponentFunction(state, function);
+            Volatile.Write(ref RegisteredFunctions, functions);
+            return id;
         }
-
-        RegisteredFunctions[id] = new ComponentFunction(state, function);
-
-        return StaticFunctionIds + id;
     }
 }
