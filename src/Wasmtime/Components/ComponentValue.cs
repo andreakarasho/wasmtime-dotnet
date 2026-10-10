@@ -841,6 +841,13 @@ public struct ComponentValue : IDisposable
         _val = default;
     }
 
+    /// <summary>
+    /// Frees a value whose whole tree the embedder allocated natively, record field and
+    /// enum case names included (as wasmtime does for a result) — e.g. one built for a
+    /// result but passed as a call argument instead. <see cref="Dispose()"/> keeps names.
+    /// </summary>
+    public void DisposeOwned() => FreeReturned();
+
     /// <inheritdoc />
     public unsafe void Dispose()
     {

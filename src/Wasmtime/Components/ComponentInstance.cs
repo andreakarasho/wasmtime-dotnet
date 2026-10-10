@@ -222,6 +222,43 @@ public unsafe class ComponentInstance
         return function;
     }
 
+    /// <summary>
+    /// The kinds of <paramref name="function"/>'s parameters, in order — enough for a host
+    /// to tell which of several signatures an export was built with.
+    /// </summary>
+    public ComponentTypeKind[] GetParamKinds(ComponentInstanceFunction function)
+    {
+#if NET
+        ObjectDisposedException.ThrowIf(_store.Disposed, nameof(Store));
+#else
+        if (_store.Disposed) throw new ObjectDisposedException(nameof(Store));
+#endif
+        var func = function.Function;
+        var ty = wasmtime_component_func_type(&func, _store.Context);
+        if (ty == null)
+            throw new WasmtimeException("function type unavailable");
+        try
+        {
+            var count = (int)wasmtime_component_func_type_param_count(ty);
+            var kinds = new ComponentTypeKind[count];
+            for (var i = 0; i < count; i++)
+            {
+                byte* name;
+                UIntPtr nameLen;
+                wasmtime_component_valtype_t valtype;
+                if (!wasmtime_component_func_type_param_nth(ty, (UIntPtr)i, &name, &nameLen, &valtype))
+                    throw new WasmtimeException($"function type has no parameter {i}");
+                kinds[i] = (ComponentTypeKind)valtype.kind;
+                wasmtime_component_valtype_delete(&valtype);
+            }
+            return kinds;
+        }
+        finally
+        {
+            wasmtime_component_func_type_delete(ty);
+        }
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowReentrancy()
     {
@@ -229,4 +266,11 @@ public unsafe class ComponentInstance
             "Cannot call a component function while another call is in progress. " +
             "Dispose the previous ComponentCallResults first.");
     }
+}
+
+/// <summary>The kind of a component value type (<c>WASMTIME_COMPONENT_VALTYPE_*</c>).</summary>
+public enum ComponentTypeKind : byte
+{
+    Bool, S8, S16, S32, S64, U8, U16, U32, U64, F32, F64, Char, String,
+    List, Record, Tuple, Variant, Enum, Option, Result, Flags, Own, Borrow, Future, Stream, ErrorContext,
 }
